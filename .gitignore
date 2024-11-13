@@ -1,5 +1,5 @@
 # файлы и папки сгенерированные Airflow
-src/logs/
+src/logs/*
 src/airflow.cfg
 src/airflow-webserver.pid
 src/standalone_admin_password.txt
