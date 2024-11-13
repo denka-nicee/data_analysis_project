@@ -1,0 +1,32 @@
+# файлы и папки сгенерированные Airflow
+src/logs/
+src/airflow.cfg
+src/airflow-webserver.pid
+src/standalone_admin_password.txt
+src/webserver_config.py
+
+## Каталоги для плагинов Airflow
+#airflow/plugins/
+
+# Каталоги для кеша Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Файлы системы macOS
+.DS_Store
+
+## Файлы с учетными данными
+#.env
+
+# Файлы IDE и редакторов
+.idea/
+.vscode/
+*.iml
+*.idea/
+
+# Файлы для виртуального окружения Python
+venv/
+.venv/
+*.venv/
