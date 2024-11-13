@@ -1,0 +1,17 @@
+environs
+
+# Библиотеки для работы с PostgreSQL
+psycopg2-binary
+
+# Apache Airflow
+apache-airflow[postgres]
+
+# Дополнительные библиотеки для работы с данными
+#pandas
+#numpy
+
+# Библиотека для работы с переменными окружения
+python-dotenv
+
+# Библиотека для работы с Kaggle (если потребуется в будущем)
+kaggle
