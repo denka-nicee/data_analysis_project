@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r /requirements.txt
 RUN pip install --no-cache-dir environs
 
 # Копируем весь исходный код и конфигурацию
-COPY src /opt/airflow
+COPY . /opt/airflow
 
 # Устанавливаем рабочую директорию
 WORKDIR /opt/airflow

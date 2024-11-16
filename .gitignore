@@ -1,9 +1,9 @@
 # файлы и папки сгенерированные Airflow
-src/logs/*
-src/airflow.cfg
-src/airflow-webserver.pid
-src/standalone_admin_password.txt
-src/webserver_config.py
+logs/*
+airflow.cfg
+airflow-webserver.pid
+standalone_admin_password.txt
+webserver_config.py
 
 ## Каталоги для плагинов Airflow
 #airflow/plugins/

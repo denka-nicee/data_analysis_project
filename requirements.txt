@@ -7,7 +7,7 @@ psycopg2-binary
 apache-airflow[postgres]
 
 # Дополнительные библиотеки для работы с данными
-#pandas
+pandas
 #numpy
 
 # Библиотека для работы с переменными окружения

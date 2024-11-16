@@ -12,7 +12,7 @@ services:
       - "5437:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgresql/scripts:/docker-entrypoint-initdb.d/ # Автоматическая инициализация скриптами
+      - ./postgresql/scripts:/docker-entrypoint-initdb.d/
 
   airflow:
     build:
@@ -35,7 +35,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./src:/opt/airflow # Копируем весь src вместо отдельных папок
+      - .:/opt/airflow
     command: ["airflow", "standalone"]
 
 volumes:
