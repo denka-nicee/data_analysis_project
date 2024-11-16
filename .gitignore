@@ -5,9 +5,6 @@ airflow-webserver.pid
 standalone_admin_password.txt
 webserver_config.py
 
-## Каталоги для плагинов Airflow
-#airflow/plugins/
-
 # Каталоги для кеша Python
 __pycache__/
 *.pyc
