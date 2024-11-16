@@ -6,6 +6,11 @@
 # from airflow.operators.python import PythonOperator
 # from environs import Env
 #
+# env = Env()
+# env.read_env("../.env")
+# username = env.str("KAGGLE_USERNAME", None)
+# key = env.str("KAGGLE_KEY", None)
+#
 # Env.str("KAGGLE_USERNAME", None)
 # Env.str("KAGGLE_KEY", None)
 # from kaggle.api.kaggle_api_extended import KaggleApi
