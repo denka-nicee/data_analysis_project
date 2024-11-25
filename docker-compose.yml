@@ -32,6 +32,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - KAGGLE_USERNAME=${KAGGLE_USERNAME}
       - KAGGLE_KEY=${KAGGLE_KEY}
+      - PYTHONPATH=/opt/airflow/
     ports:
       - "8080:8080"
     volumes:
