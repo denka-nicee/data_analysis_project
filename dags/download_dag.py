@@ -18,28 +18,33 @@ logger = logging.getLogger(__name__)
 
 
 # Определение функции проверки наличия файлов
-def check_dataset_exists():
+def is_dataset_exists() -> bool:
     dataset_path = "/tmp/kaggle_dataset/games.csv"
+
     if not os.path.exists(dataset_path):
-        logger.info(f"Директория не существует: {dataset_path}")
-        return "download_dataset"
-    files = os.listdir(dataset_path)
-    if len(files) > 0:
-        logger.info(f"Файлы уже существуют в директории: {dataset_path}")
-        return "process_data"
-    logger.info(f"Директория пуста: {dataset_path}")
-    return "download_dataset"
+        logger.info(f"Файл не существует: {dataset_path}")
+        return False
+
+    if os.path.getsize(dataset_path) > 0:  # Проверяем, что файл не пустой
+        logger.info(f"Файл существует и не пуст: {dataset_path}")
+        return True
+
+    logger.info(f"Файл существует, но пуст: {dataset_path}")
+    return False
 
 
 # Определение функции для загрузки данных
 def download_data():
-    logger.info("Начало загрузки данных")
-    try:
-        download_dataset()
-        logger.info("Загрузка данных завершена")
-    except Exception as e:
-        logger.error(f"Ошибка при загрузке данных: {e}")
-        raise
+    if is_dataset_exists():
+        return
+    else:
+        logger.info("Начало загрузки данных")
+        try:
+            download_dataset()
+            logger.info("Загрузка данных завершена")
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке данных: {e}")
+            raise
 
 
 # Определение функции для предобработки данных
@@ -57,132 +62,74 @@ def process_data():
 
     try:
         # Проверка существования файлов
-        if not os.path.exists(games_path):
-            logger.error(f"Файл не найден: {games_path}")
-            raise FileNotFoundError(f"Файл не найден: {games_path}")
-        if not os.path.exists(recommendations_path):
-            logger.error(f"Файл не найден: {recommendations_path}")
-            raise FileNotFoundError(f"Файл не найден: {recommendations_path}")
-        if not os.path.exists(users_path):
-            logger.error(f"Файл не найден: {users_path}")
-            raise FileNotFoundError(f"Файл не найден: {users_path}")
+        for file_path in [games_path, recommendations_path, users_path]:
+            if not os.path.exists(file_path):
+                logger.error(f"Файл не найден: {file_path}")
+                raise FileNotFoundError(f"Файл не найден: {file_path}")
+            if os.path.getsize(file_path) == 0:
+                logger.error(f"Файл пуст: {file_path}")
+                raise ValueError(f"Файл пуст: {file_path}")
 
-        # Проверка размера файлов
-        if os.path.getsize(games_path) == 0:
-            logger.error(f"Файл пуст: {games_path}")
-            raise ValueError(f"Файл пуст: {games_path}")
-        if os.path.getsize(recommendations_path) == 0:
-            logger.error(f"Файл пуст: {recommendations_path}")
-            raise ValueError(f"Файл пуст: {recommendations_path}")
-        if os.path.getsize(users_path) == 0:
-            logger.error(f"Файл пуст: {users_path}")
-            raise ValueError(f"Файл пуст: {users_path}")
-
-        # Загрузка и предобработка данных о играх с использованием итераторов
+        # Обработка данных о играх
         logger.info("Начало предобработки данных о играх")
-        chunk_size = 10000  # Размер фрагмента
-        games_chunks = pd.read_csv(games_path, encoding='ISO-8859-1', chunksize=chunk_size)
-        processed_games_chunks = []
-        for chunk in games_chunks:
-            # Удаляем игры с "DLC" или "Soundtrack" в названии
-            chunk = chunk[~chunk['title'].str.contains("DLC|Soundtrack", case=False, na=False, regex=True)]
+        games_df = pd.read_csv(games_path, encoding='ISO-8859-1')
 
-            # Удаляем строки с пустыми значениями
-            chunk = chunk.dropna()
+        # Удаляем игры с "DLC" или "Soundtrack" в названии
+        games_df = games_df[~games_df['title'].str.contains("DLC|Soundtrack", case=False, na=False, regex=True)]
 
-            # Удаляем дубликаты
-            chunk = chunk.drop_duplicates()
+        # Удаляем строки с пустыми значениями, дубликаты и приводим типы данных
+        games_df = games_df.dropna().drop_duplicates()
+        for key, value in types_games.items():
+            if value in [int, float]:
+                games_df[key] = pd.to_numeric(games_df[key], errors='coerce')
+            elif value == 'datetime64[ns]':
+                games_df[key] = pd.to_datetime(games_df[key], errors='coerce')
+            elif value == bool:
+                games_df[key] = games_df[key].astype('bool', errors='ignore')
+        games_df = games_df.dropna()
 
-            # Приводим типы данных
-            for key, value in types_games.items():
-                if value in [int, float]:
-                    chunk[key] = pd.to_numeric(chunk[key], errors='coerce')
-                elif value == 'datetime64[ns]':
-                    chunk[key] = pd.to_datetime(chunk[key], errors='coerce')
-                elif value == bool:
-                    chunk[key] = chunk[key].astype('bool', errors='ignore')
+        deleted_app_ids = games_df['app_id'].unique()
+        logger.info(f"Количество игр после предобработки: {len(games_df)}")
 
-            # Удаляем строки с пустыми значениями после приведения типов
-            chunk = chunk.dropna()
-
-            processed_games_chunks.append(chunk)
-
-        # Объединяем все фрагменты в один DataFrame
-        res_games = pd.concat(processed_games_chunks, ignore_index=True)
-        deleted_app_ids = res_games['app_id'].unique()  # Получаем уникальные app_id после удаления DLC и Soundtrack
-        logger.info(f"Количество игр после предобработки: {len(res_games)}")
-
-        # Загрузка и предобработка данных о рекомендациях с использованием итераторов
+        # Обработка данных о рекомендациях
         logger.info("Начало предобработки данных о рекомендациях")
-        recommendations_chunks = pd.read_csv(recommendations_path, encoding='ISO-8859-1', chunksize=chunk_size)
-        processed_recommendations_chunks = []
-        for chunk in recommendations_chunks:
-            # Удаляем рекомендации для удалённых игр
-            chunk = chunk[~chunk['app_id'].isin(deleted_app_ids)]
+        recommendations_df = pd.read_csv(recommendations_path, encoding='ISO-8859-1')
+        recommendations_df = recommendations_df[~recommendations_df['app_id'].isin(deleted_app_ids)]
+        recommendations_df = recommendations_df.dropna().drop_duplicates()
+        for key, value in types_recommendations.items():
+            if value in [int, float]:
+                recommendations_df[key] = pd.to_numeric(recommendations_df[key], errors='coerce')
+            elif value == 'datetime64[ns]':
+                recommendations_df[key] = pd.to_datetime(recommendations_df[key], errors='coerce')
+            elif value == bool:
+                recommendations_df[key] = recommendations_df[key].astype('bool', errors='ignore')
+        recommendations_df = recommendations_df.dropna()
+        logger.info(f"Количество рекомендаций после предобработки: {len(recommendations_df)}")
 
-            # Удаляем строки с пустыми значениями
-            chunk = chunk.dropna()
-
-            # Удаляем дубликаты
-            chunk = chunk.drop_duplicates()
-
-            # Приводим типы данных
-            for key, value in types_recommendations.items():
-                if value in [int, float]:
-                    chunk[key] = pd.to_numeric(chunk[key], errors='coerce')
-                elif value == 'datetime64[ns]':
-                    chunk[key] = pd.to_datetime(chunk[key], errors='coerce')
-                elif value == bool:
-                    chunk[key] = chunk[key].astype('bool', errors='ignore')
-
-            # Удаляем строки с пустыми значениями после приведения типов
-            chunk = chunk.dropna()
-
-            processed_recommendations_chunks.append(chunk)
-
-        # Объединяем все фрагменты в один DataFrame
-        res_recommendations = pd.concat(processed_recommendations_chunks, ignore_index=True)
-        logger.info(f"Количество рекомендаций после предобработки: {len(res_recommendations)}")
-
-        # Загрузка и предобработка данных о пользователях с использованием итераторов
+        # Обработка данных о пользователях
         logger.info("Начало предобработки данных о пользователях")
-        users_chunks = pd.read_csv(users_path, encoding='ISO-8859-1', chunksize=chunk_size)
-        processed_users_chunks = []
-        for chunk in users_chunks:
-            # Удаляем строки с пустыми значениями
-            chunk = chunk.dropna()
-
-            # Удаляем дубликаты
-            chunk = chunk.drop_duplicates()
-
-            # Приводим типы данных
-            for key, value in types_users.items():
-                if value in [int, float]:
-                    chunk[key] = pd.to_numeric(chunk[key], errors='coerce')
-                elif value == 'datetime64[ns]':
-                    chunk[key] = pd.to_datetime(chunk[key], errors='coerce')
-                elif value == bool:
-                    chunk[key] = chunk[key].astype('bool', errors='ignore')
-
-            # Удаляем строки с пустыми значениями после приведения типов
-            chunk = chunk.dropna()
-
-            processed_users_chunks.append(chunk)
-
-        # Объединяем все фрагменты в один DataFrame
-        res_users = pd.concat(processed_users_chunks, ignore_index=True)
-        logger.info(f"Количество пользователей после предобработки: {len(res_users)}")
+        users_df = pd.read_csv(users_path, encoding='ISO-8859-1')
+        users_df = users_df.dropna().drop_duplicates()
+        for key, value in types_users.items():
+            if value in [int, float]:
+                users_df[key] = pd.to_numeric(users_df[key], errors='coerce')
+            elif value == 'datetime64[ns]':
+                users_df[key] = pd.to_datetime(users_df[key], errors='coerce')
+            elif value == bool:
+                users_df[key] = users_df[key].astype('bool', errors='ignore')
+        users_df = users_df.dropna()
+        logger.info(f"Количество пользователей после предобработки: {len(users_df)}")
 
         # Сохранение очищенных данных в новые CSV файлы
         logger.info("Сохранение очищенных данных о играх")
-        res_games.to_csv(f'{output_path}/clear_games.csv', encoding='ISO-8859-1', sep=',', header=True, index=False)
+        games_df.to_csv(f'{output_path}/clear_games.csv', encoding='ISO-8859-1', sep=',', header=True, index=False)
 
         logger.info("Сохранение очищенных данных о рекомендациях")
-        res_recommendations.to_csv(f'{output_path}/clear_recommendations.csv', encoding='ISO-8859-1', sep=',',
-                                   header=True, index=False)
+        recommendations_df.to_csv(f'{output_path}/clear_recommendations.csv', encoding='ISO-8859-1', sep=',',
+                                  header=True, index=False)
 
         logger.info("Сохранение очищенных данных о пользователях")
-        res_users.to_csv(f'{output_path}/clear_users.csv', sep=',', header=True, index=False)
+        users_df.to_csv(f'{output_path}/clear_users.csv', sep=',', header=True, index=False)
 
         logger.info("Данные успешно обработаны и сохранены")
     except Exception as e:
@@ -198,18 +145,10 @@ default_args = {
 }
 
 dag = DAG(
-    'download_kaggle_dataset',
+    'kaggle_dataset',
     default_args=default_args,
-    description='A DAG to download multiple files (CSV and JSON) from Kaggle and process them',
     schedule_interval=None,  # Запуск только по триггеру
     catchup=False,  # Не запускать прошлые даты
-)
-
-# Определение задачи ветвления
-branch = BranchPythonOperator(
-    task_id='branch',
-    python_callable=check_dataset_exists,
-    dag=dag,
 )
 
 # Определение задачи загрузки данных
@@ -227,5 +166,4 @@ process_data_task = PythonOperator(
 )
 
 # Установка порядка выполнения задач
-branch >> [download_task, process_data_task]
 download_task >> process_data_task

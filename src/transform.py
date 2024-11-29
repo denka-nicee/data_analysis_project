@@ -94,7 +94,7 @@ def load_and_preprocess_users(path, types):
 types_games = {
     'app_id': int, 'title': object, 'date_release': 'datetime64[ns]', 'win': bool, 'mac': bool, 'linux': bool,
     'rating': object, 'positive_ratio': int, 'user_reviews': int, 'price_final': float,
-    'price_original': float, 'discount': float, 'steam_deck': bool  # Исправлено: убрали лишнюю точку с запятой
+    'price_original': float, 'discount': float, 'steam_deck': bool
 }
 
 types_recommendations = {
