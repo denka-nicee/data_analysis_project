@@ -1,1 +1,3 @@
-create table games
+CREATE TABLE IF NOT EXISTS accounts (
+    user_id SERIAL PRIMARY KEY
+    );

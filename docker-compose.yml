@@ -163,8 +163,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    volumes:
-      - ${AIRFLOW_PROJ_DIR:-.}/sql_scripts:/opt/airflow/sql_scripts
 #    environment:
 #     - postgres://postgres_user:postgres_password@postgres1:5432/postgres_db
   
@@ -183,8 +181,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    volumes:
-      - ${AIRFLOW_PROJ_DIR:-.}/sql_scripts:/opt/airflow/sql_scripts
 
   airflow-worker:
     <<: *airflow-common
@@ -208,8 +204,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    volumes:
-      - ${AIRFLOW_PROJ_DIR:-.}/sql_scripts:/opt/airflow/sql_scripts
 
   airflow-triggerer:
     <<: *airflow-common
@@ -225,8 +219,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    volumes:
-      - ${AIRFLOW_PROJ_DIR:-.}/sql_scripts:/opt/airflow/sql_scripts
 
   airflow-init:
     <<: *airflow-common
@@ -324,8 +316,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    volumes:
-      - ${AIRFLOW_PROJ_DIR:-.}/sql_scripts:/opt/airflow/sql_scripts
 
 volumes:
   postgres-db-volume:
