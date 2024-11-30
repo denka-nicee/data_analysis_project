@@ -9,3 +9,4 @@ RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt
 # Копируем все остальные файлы проекта (dags, defs и т.д.)
 COPY dags /opt/airflow/dags
 COPY defs /opt/airflow/defs
+COPY sql_scripts /opt/airflow/sql_scripts

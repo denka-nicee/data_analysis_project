@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
 
 from defs.download import download_dataset
 from defs.transform import load_and_preprocess_games, load_and_preprocess_recommendations, load_and_preprocess_users
@@ -128,5 +129,13 @@ process_data_task = PythonOperator(
     dag=dag,
 )
 
+# Задача для выполнения первого SQL-скрипта
+create_tables_task = PostgresOperator(
+    task_id='create_tables',
+    sql="/opt/airflow/sql_scripts/creating_tables.sql",
+    postgres_conn_id='dataset_db',
+    dag=dag,
+)
+
 # Установка порядка выполнения задач
-download_task >> process_data_task
+download_task >> process_data_task >> create_tables_task
