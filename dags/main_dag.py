@@ -8,6 +8,7 @@ from airflow.providers.postgres.operators.postgres import PostgresOperator
 
 from defs.download import download_dataset
 from defs.transform import load_and_preprocess_games, load_and_preprocess_recommendations, load_and_preprocess_users
+from defs.upload import load_csv_to_postgres
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ dag = DAG(
     default_args=default_args,
     schedule_interval=None,  # Запуск только по триггеру
     catchup=False,  # Не запускать прошлые даты
+    template_searchpath='/opt/airflow/'
 )
 
 # Определение задачи загрузки данных
@@ -129,13 +131,37 @@ process_data_task = PythonOperator(
     dag=dag,
 )
 
-# Задача для выполнения первого SQL-скрипта
-create_tables_task = PostgresOperator(
-    task_id='create_tables',
-    sql="/opt/airflow/sql_scripts/creating_tables.sql",
-    postgres_conn_id='dataset_db',
+# # Задача для выполнения первого SQL-скрипта
+# create_tables_task = PostgresOperator(
+#     task_id='create_tables',
+#     sql="sql_scripts/creating_tables.sql",
+#     postgres_conn_id='dataset_db',
+#     dag=dag,
+# )
+
+# Таск для загрузки данных о играх
+load_games_data_task = PythonOperator(
+    task_id='load_games_to_postgres',
+    python_callable=load_csv_to_postgres,
+    op_args=["/tmp/kaggle_dataset/cleaned_data/clear_games.csv", "games"],  # Путь и имя таблицы
+    dag=dag,
+)
+
+# Таск для загрузки данных о рекомендациях
+load_recommendations_data_task = PythonOperator(
+    task_id='load_recommendations_to_postgres',
+    python_callable=load_csv_to_postgres,
+    op_args=["/tmp/kaggle_dataset/cleaned_data/clear_recommendations.csv", "recommendations"],
+    dag=dag,
+)
+
+# Таск для загрузки данных о пользователях
+load_users_data_task = PythonOperator(
+    task_id='load_users_to_postgres',
+    python_callable=load_csv_to_postgres,
+    op_args=["/tmp/kaggle_dataset/cleaned_data/clear_users.csv", "users"],
     dag=dag,
 )
 
 # Установка порядка выполнения задач
-download_task >> process_data_task >> create_tables_task
+download_task >> process_data_task >> load_recommendations_data_task >> load_games_data_task >> load_users_data_task
