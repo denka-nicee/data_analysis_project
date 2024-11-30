@@ -1,9 +1,8 @@
 # файлы и папки сгенерированные Airflow
 logs/*
-airflow.cfg
-airflow-webserver.pid
-standalone_admin_password.txt
-webserver_config.py
+pgdata/*
+plugins/*
+config/*
 
 # Каталоги для кеша Python
 __pycache__/
@@ -13,9 +12,6 @@ __pycache__/
 
 # Файлы системы macOS
 .DS_Store
-
-## Файлы с учетными данными
-#.env
 
 # Файлы IDE и редакторов
 .idea/

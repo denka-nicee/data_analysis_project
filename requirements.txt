@@ -1,17 +1,17 @@
 environs
 
+# Apache Airflow
+apache-airflow
+
 # Библиотека для работы с переменными окружения
 python-dotenv
 
 # Библиотеки для работы с PostgreSQL
 psycopg2-binary
 
-# Apache Airflow
-apache-airflow
-
 # Дополнительные библиотеки для работы с данными
 pandas
-#numpy
+numpy
 
 # Библиотека для работы с Kaggle (если потребуется в будущем)
 kaggle

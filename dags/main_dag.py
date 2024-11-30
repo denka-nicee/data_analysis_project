@@ -4,11 +4,9 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.providers.postgres.operators.postgres import PostgresOperator
 
-from src.extract import download_dataset
-from src.load import create_and_load_database
-from src.transform import load_and_preprocess_games, load_and_preprocess_recommendations, load_and_preprocess_users
+from defs.download import download_dataset
+from defs.transform import load_and_preprocess_games, load_and_preprocess_recommendations, load_and_preprocess_users
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -110,7 +108,7 @@ default_args = {
 }
 
 dag = DAG(
-    'kaggle_dataset',
+    'big_data_project',
     default_args=default_args,
     schedule_interval=None,  # Запуск только по триггеру
     catchup=False,  # Не запускать прошлые даты
@@ -130,12 +128,5 @@ process_data_task = PythonOperator(
     dag=dag,
 )
 
-# Определение задачи загрузки данных в базу данных
-load_to_db_task = PythonOperator(
-    task_id='load_to_db',
-    python_callable=create_and_load_database,
-    dag=dag,
-)
-
-# # Установка порядка выполнения задач
-download_task >> process_data_task >> load_to_db_task
+# Установка порядка выполнения задач
+download_task >> process_data_task
