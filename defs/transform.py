@@ -1,5 +1,14 @@
-import pandas as pd
+import logging
 
+import pandas as pd
+from airflow.hooks.base_hook import BaseHook
+from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
+# Обработчики типов данных для каждой таблицы
 types_games = {
     'app_id': int, 'title': object, 'date_release': 'datetime64[ns]', 'win': bool, 'mac': bool, 'linux': bool,
     'rating': object, 'positive_ratio': int, 'user_reviews': int, 'price_final': float,
@@ -16,91 +25,131 @@ types_users = {
 }
 
 
-# Функции для предобработки данных
-def load_and_preprocess_games(path):
-    """
-    Загружает и предобрабатывает данные о играх.
-    """
-    games_df = pd.read_csv(path, encoding='ISO-8859-1')
+# Удаление таблицы, если она уже существует
+def drop_table_if_exists(engine, table_name):
+    try:
+        with engine.connect() as conn:
+            conn.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE")
+            logger.info(f"Таблица {table_name} удалена (если она существовала).")
+    except SQLAlchemyError as e:
+        logger.error(f"Ошибка при удалении таблицы {table_name}: {e}")
 
-    # Удаляем игры с "DLC" или "Soundtrack" в названии
-    games_df = games_df[~games_df['title'].str.contains("DLC|Soundtrack", case=False, na=False)]
 
+def common_transform(chunk, table_name):
     # Удаляем строки с пустыми значениями
-    games_df = games_df.dropna()
+    chunk = chunk.dropna()
 
     # Удаляем дубликаты
-    games_df = games_df.drop_duplicates()
+    chunk = chunk.drop_duplicates()
+
+    if table_name == 'games':
+        types = types_games
+    elif table_name == 'recommendations':
+        types = types_recommendations
+    elif table_name == 'users':
+        types = types_users
 
     # Приводим типы данных
-    for key, value in types_games.items():
+    for key, value in types.items():
         if value in [int, float]:
-            games_df[key] = pd.to_numeric(games_df[key], errors='coerce')
+            chunk[key] = pd.to_numeric(chunk[key], errors='coerce')
         elif value == 'datetime64[ns]':
-            games_df[key] = pd.to_datetime(games_df[key], errors='coerce')
+            chunk[key] = pd.to_datetime(chunk[key], errors='coerce')
         elif value == bool:
-            games_df[key] = games_df[key].astype('bool', errors='ignore')
+            chunk[key] = chunk[key].astype('bool', errors='ignore')
 
     # Удаляем строки с пустыми значениями после приведения типов
-    games_df = games_df.dropna()
+    chunk = chunk.dropna()
 
-    app_ids = games_df['app_id'].unique()
-    return games_df, app_ids
-
-
-def load_and_preprocess_recommendations(path, app_ids):
-    """
-    Загружает и предобрабатывает данные о рекомендациях.
-    """
-    recommendations_df = pd.read_csv(path, encoding='ISO-8859-1')
-
-    # Удаляем строки с пустыми значениями
-    recommendations_df = recommendations_df.dropna()
-
-    # Удаляем дубликаты
-    recommendations_df = recommendations_df.drop_duplicates()
-
-    # Удаляем рекомендации для удалённых игр
-    recommendations_df = recommendations_df[recommendations_df['app_id'].isin(app_ids)]
+    return chunk
 
 
-    # Приводим типы данных
-    for key, value in types_recommendations.items():
-        if value in [int, float]:
-            recommendations_df[key] = pd.to_numeric(recommendations_df[key], errors='coerce')
-        elif value == 'datetime64[ns]':
-            recommendations_df[key] = pd.to_datetime(recommendations_df[key], errors='coerce')
-        elif value == bool:
-            recommendations_df[key] = recommendations_df[key].astype('bool', errors='ignore')
+# Обработка и загрузка данных о играх
+def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000):
+    # Получаем параметры подключения из Airflow
+    conn_id = BaseHook.get_connection(postgres_conn_id)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
 
-    # Удаляем строки с пустыми значениями после приведения типов
-    recommendations_df = recommendations_df.dropna()
+    # Создаем соединение с базой данных
+    engine = create_engine(db_url)
 
-    return recommendations_df
+    app_ids = set()
+
+    try:
+        # Удаляем таблицу, если она существует
+        drop_table_if_exists(engine, "games")
+
+        # Чтение данных из CSV по частям
+        for chunk in pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunk_size):
+            # Удаляем игры с "DLC" или "Soundtrack" в названии
+            chunk = chunk[~chunk['title'].str.contains("DLC|Soundtrack", case=False, na=False)]
+
+            common_transform(chunk, "games")
+
+            # Добавление app_id в сет
+            app_ids.update(chunk['app_id'].unique())
+
+            # Загрузка данных в базу данных
+            chunk.to_sql("games", engine, if_exists='append', index=False)
+            logger.info(f"Загружено {len(chunk)} строк в таблицу games")
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке и загрузке данных о играх: {e}")
+        raise
+
+    return app_ids
 
 
-def load_and_preprocess_users(path):
-    """
-    Загружает и предобрабатывает данные о пользователях.
-    """
-    users_df = pd.read_csv(path, encoding='ISO-8859-1')
+# Обработка и загрузка данных о рекомендациях
+def process_and_load_recommendations(path, app_ids, postgres_conn_id='dataset_db', chunk_size=10000):
+    # Получаем параметры подключения из Airflow
+    conn_id = BaseHook.get_connection(postgres_conn_id)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
 
-    # Удаляем строки с пустыми значениями
-    users_df = users_df.dropna()
+    # Создаем соединение с базой данных
+    engine = create_engine(db_url)
 
-    # Удаляем дубликаты
-    users_df = users_df.drop_duplicates()
+    try:
+        # Удаляем таблицу, если она существует
+        drop_table_if_exists(engine, "recommendations")
 
-    # Приводим типы данных
-    for key, value in types_users.items():
-        if value in [int, float]:
-            users_df[key] = pd.to_numeric(users_df[key], errors='coerce')
-        elif value == 'datetime64[ns]':
-            users_df[key] = pd.to_datetime(users_df[key], errors='coerce')
-        elif value == bool:
-            users_df[key] = users_df[key].astype('bool', errors='ignore')
+        # Чтение данных из CSV по частям
+        for chunk in pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunk_size):
+            # Удаляем рекомендации для удалённых игр
+            chunk = chunk[chunk['app_id'].isin(app_ids)]
 
-    # Удаляем строки с пустыми значениями после приведения типов
-    users_df = users_df.dropna()
+            common_transform(chunk, "recommendations")
 
-    return users_df
+            # Загрузка данных в базу данных
+            chunk.to_sql("recommendations", engine, if_exists='append', index=False)
+            logger.info(f"Загружено {len(chunk)} строк в таблицу recommendations")
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке и загрузке данных о рекомендациях: {e}")
+        raise
+
+
+# Обработка и загрузка данных о пользователях
+def process_and_load_users(path, postgres_conn_id='dataset_db', chunk_size=10000):
+    # Получаем параметры подключения из Airflow
+    conn_id = BaseHook.get_connection(postgres_conn_id)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
+
+    # Создаем соединение с базой данных
+    engine = create_engine(db_url)
+
+    try:
+        # Удаляем таблицу, если она существует
+        drop_table_if_exists(engine, "users")
+
+        # Чтение данных из CSV по частям
+        for chunk in pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunk_size):
+            common_transform(chunk, "users")
+
+            # Загрузка данных в базу данных
+            chunk.to_sql("users", engine, if_exists='append', index=False)
+            logger.info(f"Загружено {len(chunk)} строк в таблицу users")
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке и загрузке данных о пользователях: {e}")
+        raise

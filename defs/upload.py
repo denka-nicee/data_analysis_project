@@ -1,4 +1,3 @@
-import psycopg2
 import pandas as pd
 from airflow.hooks.base_hook import BaseHook
 from sqlalchemy import create_engine
