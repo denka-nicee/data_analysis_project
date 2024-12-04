@@ -3,9 +3,12 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.operators.python import PythonOperator
 
+from defs import stg_to_dds
 from defs.download import download_dataset
+from defs.stg_to_dds import migrate_all_data
 from defs.transform import process_and_load_games, process_and_load_recommendations, process_and_load_users
 from defs.upload import load_csv_to_postgres
 
@@ -65,18 +68,25 @@ def process_data():
 
         logger.info(f"Данные об играх обработаны")
 
-        # Обработка данных о рекомендациях
-        logger.info("Начало предобработки данных о рекомендациях")
-        process_and_load_recommendations(recommendations_path, app_ids)
-        logger.info(f"Данные о рекомендациях обработаны")
 
         # Обработка данных о пользователях
         logger.info("Начало предобработки данных о пользователях")
         process_and_load_users(users_path)
         logger.info(f"Данные о пользователях обработаны")
+
+
+        # Обработка данных о рекомендациях
+        logger.info("Начало предобработки данных о рекомендациях")
+        process_and_load_recommendations(recommendations_path, app_ids)
+        logger.info(f"Данные о рекомендациях обработаны")
+
+
     except Exception as e:
         logger.error(f"Ошибка при обработке данных: {e}")
         raise
+
+def stg_to_dds():
+    migrate_all_data()
 
 
 # Определение DAGа
@@ -101,20 +111,27 @@ download_task = PythonOperator(
     dag=dag,
 )
 
-# Определение задачи предобработки данных
-process_data_task = PythonOperator(
-    task_id='process_data',
-    python_callable=process_data,
+download_data_to_dds = PythonOperator(
+    task_id='stg_to_dds',
+    python_callable = stg_to_dds,
     dag=dag,
 )
 
-# # Задача для выполнения первого SQL-скрипта
-# create_tables_task = PostgresOperator(
-#     task_id='create_tables',
-#     sql="sql_scripts/creating_tables.sql",
-#     postgres_conn_id='dataset_db',
+# # Определение задачи предобработки данных
+# process_data_task = PythonOperator(
+#     task_id='process_data',
+#     python_callable=process_data,
 #     dag=dag,
 # )
 
+# Задача для выполнения первого SQL-скрипта
+create_tables_task = PostgresOperator(
+    task_id='create_tables',
+    sql="sql_scripts/creating_tables.sql",
+    postgres_conn_id='dataset_db',
+    dag=dag,
+)
+
 # Установка порядка выполнения задач
-download_task >> process_data_task
+# download_task >>create_tables_task >> process_data_task
+download_task >> create_tables_task >> download_data_to_dds
