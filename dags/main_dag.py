@@ -3,11 +3,13 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.operators.python import PythonOperator
 
+from defs import stg_to_dds
 from defs.download import download_dataset
-from defs.transform import load_and_preprocess_games, load_and_preprocess_recommendations, load_and_preprocess_users
+from defs.stg_to_dds import  calculate_correlation
+from defs.transform import process_and_load_games, process_and_load_recommendations, process_and_load_users
 from defs.upload import load_csv_to_postgres
 
 # Настройка логирования
@@ -44,62 +46,47 @@ def download_data():
 
 # Определение функции для предобработки данных
 def process_data():
-    if is_dataset_exists("/tmp/kaggle_dataset/cleaned_data/clear_games.csv"):
-        return
-    else:
-        # Определяем пути к файлам
-        games_path = "/tmp/kaggle_dataset/games.csv"
-        recommendations_path = "/tmp/kaggle_dataset/recommendations.csv"
-        users_path = "/tmp/kaggle_dataset/users.csv"
+    # Определяем пути к файлам
+    games_path = "/tmp/kaggle_dataset/games.csv"
+    recommendations_path = "/tmp/kaggle_dataset/recommendations.csv"
+    users_path = "/tmp/kaggle_dataset/users.csv"
 
-        # Определяем путь для сохранения очищенных данных
-        output_path = "/tmp/kaggle_dataset/cleaned_data"
+    try:
+        # Проверка существования файлов
+        for file_path in [games_path, recommendations_path, users_path]:
+            if not os.path.exists(file_path):
+                logger.error(f"Файл не найден: {file_path}")
+                raise FileNotFoundError(f"Файл не найден: {file_path}")
+            if os.path.getsize(file_path) == 0:
+                logger.error(f"Файл пуст: {file_path}")
+                raise ValueError(f"Файл пуст: {file_path}")
 
-        # Создаем директорию, если она не существует
-        os.makedirs(output_path, exist_ok=True)
+        # Обработка данных о играх
+        logger.info("Начало предобработки данных о играх")
 
-        try:
-            # Проверка существования файлов
-            for file_path in [games_path, recommendations_path, users_path]:
-                if not os.path.exists(file_path):
-                    logger.error(f"Файл не найден: {file_path}")
-                    raise FileNotFoundError(f"Файл не найден: {file_path}")
-                if os.path.getsize(file_path) == 0:
-                    logger.error(f"Файл пуст: {file_path}")
-                    raise ValueError(f"Файл пуст: {file_path}")
+        app_ids = process_and_load_games(games_path)
 
-            # Обработка данных о играх
-            logger.info("Начало предобработки данных о играх")
+        logger.info(f"Данные об играх обработаны")
 
-            games_df, app_ids = load_and_preprocess_games(games_path)
 
-            logger.info(f"Количество игр после предобработки: {len(games_df)}")
+        # Обработка данных о пользователях
+        logger.info("Начало предобработки данных о пользователях")
+        process_and_load_users(users_path)
+        logger.info(f"Данные о пользователях обработаны")
 
-            # Обработка данных о рекомендациях
-            logger.info("Начало предобработки данных о рекомендациях")
-            recommendations_df = load_and_preprocess_recommendations(recommendations_path, app_ids)
-            logger.info(f"Количество рекомендаций после предобработки: {len(recommendations_df)}")
 
-            # Обработка данных о пользователях
-            logger.info("Начало предобработки данных о пользователях")
-            users_df = load_and_preprocess_users(users_path)
-            logger.info(f"Количество пользователей после предобработки: {len(users_df)}")
+        # Обработка данных о рекомендациях
+        logger.info("Начало предобработки данных о рекомендациях")
+        process_and_load_recommendations(recommendations_path, app_ids)
+        logger.info(f"Данные о рекомендациях обработаны")
 
-            # Сохранение очищенных данных в новые CSV файлы
-            logger.info("Сохранение очищенных данных о играх")
-            games_df.to_csv(f'{output_path}/clear_games.csv', encoding='ISO-8859-1', sep=',', header=True, index=False)
 
-            logger.info("Сохранение очищенных данных о рекомендациях")
-            recommendations_df.to_csv(f'{output_path}/clear_recommendations.csv', encoding='ISO-8859-1', sep=',',
-                                      header=True, index=False)
+    except Exception as e:
+        logger.error(f"Ошибка при обработке данных: {e}")
+        raise
 
-            logger.info("Сохранение очищенных данных о пользователях")
-            users_df.to_csv(f'{output_path}/clear_users.csv', sep=',', header=True, index=False)
-
-            logger.info("Данные успешно обработаны и сохранены")
-        except Exception as e:
-            logger.error(f"Ошибка при обработке данных: {e}")
-            raise
+def stg_to_dds():
+    calculate_correlation()
 
 
 # Определение DAGа
@@ -124,44 +111,36 @@ download_task = PythonOperator(
     dag=dag,
 )
 
-# Определение задачи предобработки данных
-process_data_task = PythonOperator(
-    task_id='process_data',
-    python_callable=process_data,
-    dag=dag,
-)
 
-# # Задача для выполнения первого SQL-скрипта
-# create_tables_task = PostgresOperator(
-#     task_id='create_tables',
-#     sql="sql_scripts/creating_tables.sql",
-#     postgres_conn_id='dataset_db',
+# # Определение задачи предобработки данных
+# process_data_task = PythonOperator(
+#     task_id='process_data',
+#     python_callable=process_data,
 #     dag=dag,
 # )
 
-# Таск для загрузки данных о играх
-load_games_data_task = PythonOperator(
-    task_id='load_games_to_postgres',
-    python_callable=load_csv_to_postgres,
-    op_args=["/tmp/kaggle_dataset/cleaned_data/clear_games.csv", "games"],  # Путь и имя таблицы
+# Задача для выполнения первого SQL-скрипта
+move_dds_to_stg = PostgresOperator(
+    task_id='create_tables',
+    sql="sql_scripts/move_dds_to_stg.sql",
+    postgres_conn_id='dataset_db',
     dag=dag,
 )
 
-# Таск для загрузки данных о рекомендациях
-load_recommendations_data_task = PythonOperator(
-    task_id='load_recommendations_to_postgres',
-    python_callable=load_csv_to_postgres,
-    op_args=["/tmp/kaggle_dataset/cleaned_data/clear_recommendations.csv", "recommendations"],
+dds_to_dm = PostgresOperator(
+    task_id='create_dm',
+    sql="sql_scripts/dds_to_dm.sql",
+    postgres_conn_id='dataset_db',
     dag=dag,
 )
 
-# Таск для загрузки данных о пользователях
-load_users_data_task = PythonOperator(
-    task_id='load_users_to_postgres',
-    python_callable=load_csv_to_postgres,
-    op_args=["/tmp/kaggle_dataset/cleaned_data/clear_users.csv", "users"],
+get_correlation = PythonOperator(
+    task_id='get_correlation',
+    python_callable=stg_to_dds,
     dag=dag,
 )
+
 
 # Установка порядка выполнения задач
-download_task >> process_data_task >> load_recommendations_data_task >> load_games_data_task >> load_users_data_task
+# download_task >> process_data_task >> move_dds_to_stg >> dds_to_dm
+download_task >> move_dds_to_stg >> dds_to_dm >> get_correlation
