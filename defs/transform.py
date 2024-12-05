@@ -63,6 +63,15 @@ def common_transform(chunk, table_name):
 
     return chunk
 
+def get_table_size(engine, table_name, schema='dds_stg'):
+    query = f"""
+    SELECT pg_total_relation_size('"{schema}"."{table_name}"') AS size; 
+    """
+    with engine.connect() as conn:
+        result = conn.execute(query).fetchone()
+        return result['size'] if result else 0
+
+
 
 # Обработка и загрузка данных о играх
 def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000):
@@ -78,6 +87,13 @@ def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000
     app_ids = set()
 
     try:
+        table_size = get_table_size(engine, "games")
+        max_size = 5*1024*1024
+
+        if table_size > max_size:
+            logger.info(f"Размер таблицы 'games' превышает 5МБ ({table_size} байт). Загрузка пропущена.")
+            return app_ids
+
         # Удаляем таблицу, если она существует
         drop_table_if_exists(engine, "games")
 
@@ -100,6 +116,43 @@ def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000
         raise
 
     return app_ids
+#
+# # Обработка и загрузка данных о играх
+# def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000):
+#     # Получаем параметры подключения из Airflow
+#     conn_id = BaseHook.get_connection(postgres_conn_id)
+#     # conn_id.schema = 'dds'
+#     # print(conn_id.schema)
+#     db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}?options=-csearch_path=dds_stg"
+#
+#     # Создаем соединение с базой данных
+#     engine = create_engine(db_url)
+#
+#     app_ids = set()
+#
+#     try:
+#         # Удаляем таблицу, если она существует
+#         drop_table_if_exists(engine, "games")
+#
+#         # Чтение данных из CSV по частям
+#         for chunk in pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunk_size):
+#             # Удаляем игры с "DLC" или "Soundtrack" в названии
+#             chunk = chunk[~chunk['title'].str.contains("DLC|Soundtrack", case=False, na=False)]
+#
+#             common_transform(chunk, "games")
+#
+#             # Добавление app_id в сет
+#             app_ids.update(chunk['app_id'].unique())
+#
+#             # Загрузка данных в базу данных
+#             chunk.to_sql("games", engine,schema='dds_stg', if_exists='append', index=False)
+#             logger.info(f"Загружено {len(chunk)} строк в таблицу games")
+#
+#     except Exception as e:
+#         logger.error(f"Ошибка при обработке и загрузке данных о играх: {e}")
+#         raise
+#
+#     return app_ids
 
 
 # Обработка и загрузка данных о рекомендациях

@@ -112,12 +112,12 @@ download_task = PythonOperator(
 )
 
 
-# # Определение задачи предобработки данных
-# process_data_task = PythonOperator(
-#     task_id='process_data',
-#     python_callable=process_data,
-#     dag=dag,
-# )
+# Определение задачи предобработки данных
+process_data_task = PythonOperator(
+    task_id='process_data',
+    python_callable=process_data,
+    dag=dag,
+)
 
 # Задача для выполнения первого SQL-скрипта
 move_dds_to_stg = PostgresOperator(
@@ -142,5 +142,5 @@ get_correlation = PythonOperator(
 
 
 # Установка порядка выполнения задач
-# download_task >> process_data_task >> move_dds_to_stg >> dds_to_dm
-download_task >> move_dds_to_stg >> dds_to_dm >> get_correlation
+download_task >> process_data_task >> move_dds_to_stg >> dds_to_dm >> get_correlation
+# download_task >> move_dds_to_stg >> dds_to_dm >> get_correlation
