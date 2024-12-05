@@ -1,5 +1,6 @@
 import logging
 
+
 import pandas as pd
 from airflow.hooks.base_hook import BaseHook
 from sqlalchemy import create_engine
@@ -63,14 +64,30 @@ def common_transform(chunk, table_name):
 
     return chunk
 
-def get_table_size(engine, table_name, schema='dds_stg'):
-    query = f"""
-    SELECT pg_total_relation_size('"{schema}"."{table_name}"') AS size; 
-    """
-    with engine.connect() as conn:
-        result = conn.execute(query).fetchone()
-        return result['size'] if result else 0
 
+def get_table_size(engine, table_name, schema='dds_stg'):
+    # Проверка наличия таблицы в схеме
+    check_table_query = f"""
+    SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables 
+        WHERE table_schema = '{schema}' AND table_name = '{table_name}'
+    ) AS table_exists;
+    """
+
+    with engine.connect() as conn:
+        table_exists = conn.execute(check_table_query).scalar()
+
+        # Если таблицы нет, возвращаем 0 как её размер
+        if not table_exists:
+            return 0
+
+        # Если таблица существует, проверяем её размер
+        size_query = f"""
+        SELECT pg_total_relation_size('"{schema}"."{table_name}"') AS size; 
+        """
+        result = conn.execute(size_query).fetchone()
+        return result['size'] if result else 0
 
 
 # Обработка и загрузка данных о играх
@@ -107,8 +124,15 @@ def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000
             # Добавление app_id в сет
             app_ids.update(chunk['app_id'].unique())
 
+
+            # Создаём схему, если она ещё не существует
+            with engine.connect() as conn:
+                conn.execute("CREATE SCHEMA IF NOT EXISTS dds_stg;")
+                logger.info("Схема 'dds_stg' успешно создана или уже существует.")
+
+
             # Загрузка данных в базу данных
-            chunk.to_sql("games", engine,schema='dds_stg', if_exists='append', index=False)
+            chunk.to_sql("games", engine, schema='dds_stg', if_exists='append', index=False)
             logger.info(f"Загружено {len(chunk)} строк в таблицу games")
 
     except Exception as e:
@@ -164,7 +188,17 @@ def process_and_load_recommendations(path, app_ids, postgres_conn_id='dataset_db
     # Создаем соединение с базой данных
     engine = create_engine(db_url)
 
+
+
     try:
+
+        table_size = get_table_size(engine, "recommendations")
+        max_size = 5 * 1024 * 1024
+
+        if table_size > max_size:
+            logger.info(f"Размер таблицы 'recommendations' превышает 5МБ ({table_size} байт). Загрузка пропущена.")
+            return
+
         # Удаляем таблицу, если она существует
         drop_table_if_exists(engine, "recommendations")
 
@@ -194,6 +228,14 @@ def process_and_load_users(path, postgres_conn_id='dataset_db', chunk_size=10000
     engine = create_engine(db_url)
 
     try:
+        table_size = get_table_size(engine, "users")
+        max_size = 5 * 1024 * 1024
+
+        if table_size > max_size:
+            logger.info(f"Размер таблицы 'users' превышает 5МБ ({table_size} байт). Загрузка пропущена.")
+            return
+
+
         # Удаляем таблицу, если она существует
         drop_table_if_exists(engine, "users")
 

@@ -3,23 +3,23 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 
 -- Создание схемы dds, если она не существует
+
+DROP TABLE IF EXISTS public;
+
 CREATE SCHEMA IF NOT EXISTS dds;
 
 
-CREATE SCHEMA IF NOT EXISTS dds_stg;
-
-
 -- Удаляем существующую таблицу, если она существует
-DROP TABLE IF EXISTS dds_stg.users CASCADE;
+DROP TABLE IF EXISTS dds.users CASCADE;
 
-DROP TABLE IF EXISTS dds_stg.games CASCADE;
+DROP TABLE IF EXISTS dds.games CASCADE;
 
-DROP TABLE IF EXISTS dds_stg.recommendations CASCADE;
+DROP TABLE IF EXISTS dds.recommendations CASCADE;
 
 
 
 -- Создаем новую таблицу с типами данных VARCHAR для рейтинга и соотношения положительных отзывов
-CREATE TABLE dds_stg.games (
+CREATE TABLE dds.games (
     app_id INT,
     title VARCHAR(255),
     date_release DATE,
@@ -30,7 +30,7 @@ CREATE TABLE dds_stg.games (
 );
 
 -- Вставляем данные в новую таблицу с учетом преобразования типов
-INSERT INTO dds_stg.games (app_id, title, date_release, rating, positive_ratio, user_reviews, price_final)
+INSERT INTO dds.games (app_id, title, date_release, rating, positive_ratio, user_reviews, price_final)
 SELECT
     app_id,
     title,
@@ -39,13 +39,13 @@ SELECT
     positive_ratio,  -- Оставляем как есть (тип VARCHAR)
     CAST(user_reviews AS INT) AS user_reviews,             -- Преобразуем в INT, если нужно
     CAST(price_final AS DECIMAL) AS price_final             -- Преобразуем в DECIMAL, если нужно
-FROM dds.games;
+FROM dds_stg.games;
 
 
 
 
 -- Создаем новую таблицу с типами данных VARCHAR для поля `is_recommended`
-CREATE TABLE dds_stg.recommendations (
+CREATE TABLE dds.recommendations (
     app_id INT,
     helpful INT,
     funny INT,
@@ -57,7 +57,7 @@ CREATE TABLE dds_stg.recommendations (
 );
 
 -- Вставляем данные в новую таблицу с учетом преобразования типов
-INSERT INTO dds_stg.recommendations (app_id, helpful, funny, date, is_recommended, hours, user_id, review_id)
+INSERT INTO dds.recommendations (app_id, helpful, funny, date, is_recommended, hours, user_id, review_id)
 SELECT
     app_id,
     helpful,
@@ -70,23 +70,23 @@ SELECT
     hours,
     user_id,
     review_id
-FROM dds.recommendations;
+FROM dds_stg.recommendations;
 
 
 -- Удаляем существующую таблицу, если она существует
 
 -- Создаем новую таблицу с типами данных VARCHAR для полей
-CREATE TABLE dds_stg.users (
+CREATE TABLE dds.users (
     user_id INT,
     products VARCHAR(255),  -- Тип данных для products изменен на VARCHAR
     reviews VARCHAR(255)   -- Тип данных для reviews изменен на VARCHAR
 );
 
 -- Вставляем данные в новую таблицу
-INSERT INTO dds_stg.users (user_id, products, reviews)
+INSERT INTO dds.users (user_id, products, reviews)
 SELECT
     user_id,
     products,
     reviews
-FROM dds.users;
+FROM dds_stg.users;
 

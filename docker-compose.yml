@@ -271,6 +271,23 @@ services:
         fi
         mkdir -p /sources/logs /sources/dags /sources/plugins
         chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
+        
+        airflow db init
+        airflow users create \
+        --username admin \
+        --password admin \
+        --firstname Admin \
+        --lastname User \
+        --role Admin \
+        --email admin@example.com
+        airflow connections add 'dataset_db' \
+        --conn-type 'postgres' \
+        --conn-host 'postgres1' \
+        --conn-login 'postgres_user' \
+        --conn-password 'postgres_password' \
+        --conn-schema 'postgres_db' \
+        --conn-port '5432'
+
         exec /entrypoint airflow version
     # yamllint enable rule:line-length
     environment:
