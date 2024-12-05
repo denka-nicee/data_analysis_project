@@ -1,8 +1,8 @@
 # файлы и папки сгенерированные Airflow
+logs/*
 pgdata/*
 plugins/*
 config/*
-/logs*
 
 # Каталоги для кеша Python
 __pycache__/
@@ -24,4 +24,5 @@ venv/
 .venv/
 *.venv/
 /config/
+/logs/
 /plugins/
