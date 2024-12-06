@@ -4,9 +4,16 @@
 
 -- Создание схемы dds, если она не существует
 
-DROP TABLE IF EXISTS public;
+DROP SCHEMA IF EXISTS public;
 
-CREATE SCHEMA IF NOT EXISTS dds;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'dds') THEN
+        CREATE SCHEMA dds;
+    END IF;
+END;
+$$;
+
 
 
 -- Удаляем существующую таблицу, если она существует
