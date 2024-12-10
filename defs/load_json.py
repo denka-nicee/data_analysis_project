@@ -1,39 +1,93 @@
 import logging
-
+import json
 import os
 import pandas as pd
 from airflow.hooks.base_hook import BaseHook
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
 
+# def load_json():
+#     # Определяем пути к файлам
+#     json_path = '/tmp/kaggle_dataset/games_metadata.json'
+#
+#     try:
+#         # Проверка существования файлов
+#         for file_path in [json_path]:
+#             if not os.path.exists(file_path):
+#                 logger.error(f"Файл не найден: {file_path}")
+#                 raise FileNotFoundError(f"Файл не найден: {file_path}")
+#             if os.path.getsize(file_path) == 0:
+#                 logger.error(f"Файл пуст: {file_path}")
+#                 raise ValueError(f"Файл пуст: {file_path}")
+#
+#         # Обработка данных о играх
+#         logger.info("Начало предобработки данных о играх")
+#
+#         # Чтение и загрузка данных в PostgreSQL
+#         process_and_load_metadata(json_path)
+#
+#         logger.info("Данные об играх обработаны и загружены в базу данных")
+#
+#     except Exception as e:
+#         logger.error(f"Ошибка при обработке данных: {e}")
+#         raise
+
+
 def load_json():
-    # Определяем пути к файлам
+    # Определяем путь к JSON-файлу
     json_path = '/tmp/kaggle_dataset/games_metadata.json'
 
     try:
         # Проверка существования файлов
-        for file_path in [json_path]:
-            if not os.path.exists(file_path):
-                logger.error(f"Файл не найден: {file_path}")
-                raise FileNotFoundError(f"Файл не найден: {file_path}")
-            if os.path.getsize(file_path) == 0:
-                logger.error(f"Файл пуст: {file_path}")
-                raise ValueError(f"Файл пуст: {file_path}")
+        if not os.path.exists(json_path):
+            logger.error(f"Файл не найден: {json_path}")
+            raise FileNotFoundError(f"Файл не найден: {json_path}")
+        if os.path.getsize(json_path) == 0:
+            logger.error(f"Файл пуст: {json_path}")
+            raise ValueError(f"Файл пуст: {json_path}")
 
         # Обработка данных о играх
         logger.info("Начало предобработки данных о играх")
 
-        # Чтение и загрузка данных в PostgreSQL
-        process_and_load_metadata(json_path)
+        # Чтение и обработка данных
+        df = read_and_process_json(json_path, predefined_tags=["Action", "Adventure", "Strategy", "RPG", "Simulation"])
+
+        # Загрузка данных в PostgreSQL
+        postgres_conn_id = 'dataset_db'
+        process_and_load_to_postgres(df, postgres_conn_id, table_name="metadata")
 
         logger.info("Данные об играх обработаны и загружены в базу данных")
 
     except Exception as e:
         logger.error(f"Ошибка при обработке данных: {e}")
         raise
+
+
+def process_and_load_to_postgres(df, postgres_conn_id, table_name="metadata"):
+    """
+    Загружает DataFrame в PostgreSQL.
+    """
+    conn_id = BaseHook.get_connection(postgres_conn_id)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
+    engine = create_engine(db_url)
+
+    try:
+        # Создание схемы и удаление старой таблицы
+        create_schema_if_not_exists(engine)
+        drop_table_if_exists(engine, table_name)
+
+        # Загрузка данных
+        load_data_to_postgres(df, engine, table_name)
+
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке данных в PostgreSQL: {e}")
+        raise
+    finally:
+        engine.dispose()
 
 
 def read_json_data(path):
@@ -66,22 +120,63 @@ def load_data_to_postgres(chunk, engine, table_name):
         raise
 
 
-def process_and_load_metadata(path, postgres_conn_id='dataset_db'):
-    conn_id = BaseHook.get_connection(postgres_conn_id)
-    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
-    engine = create_engine(db_url)
-
+def read_and_process_json(path, top_n_tags=5, predefined_tags=None):
+    """
+    Читает JSON и обрабатывает данные.
+    """
     try:
-        create_schema_if_not_exists(engine)
-        drop_table_if_exists(engine, "metadata")
+        # Считываем данные построчно
+        records = []
+        with open(path, 'r', encoding='utf-8') as file:
+            for line in file:
+                data = json.loads(line)
+                if 'app_id' in data and 'tags' in data:
+                    records.append({'app_id': data['app_id'], 'tags': data['tags']})
 
-        # Чтение данных из JSON
-        chunk = read_json_data(path)
+        # Преобразуем в DataFrame
+        df = pd.DataFrame(records)
 
-        # Загрузка данных в таблицу metadata
-        load_data_to_postgres(chunk, engine, "metadata")
+        # Частотный анализ всех тегов
+        all_tags = [tag for tags in df['tags'] for tag in tags]
+        tag_counter = Counter(all_tags)
+
+        # Сокращение тегов для каждой игры
+        def filter_tags(tags):
+            # Фильтруем по частоте или предопределённым тегам
+            if predefined_tags:
+                tags = [tag for tag in tags if tag in predefined_tags]
+            # Сортируем по частоте и выбираем top_n_tags
+            tags = sorted(tags, key=lambda x: tag_counter[x], reverse=True)
+            return tags[:top_n_tags]
+
+        df['tags'] = df['tags'].apply(filter_tags)
+
+        return df
 
     except Exception as e:
-        logger.error(f"Ошибка при обработке и загрузке данных о метаданных: {e}")
+        logger.error(f"Ошибка при обработке JSON: {e}")
         raise
+
+
+# def process_and_load_metadata(path, postgres_conn_id='dataset_db'):
+#     conn_id = BaseHook.get_connection(postgres_conn_id)
+#     db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
+#     engine = create_engine(db_url)
+#
+#     try:
+#         df = read_and_process_json(path)
+#
+#
+#         create_schema_if_not_exists(engine)
+#         drop_table_if_exists(engine, "metadata")
+#
+#         # Чтение данных из JSON
+#         chunk = read_json_data(path)
+#
+#         # Загрузка данных в таблицу metadata
+#         load_data_to_postgres(chunk, engine, "metadata")
+#
+#     except Exception as e:
+#         logger.error(f"Ошибка при обработке и загрузке данных о метаданных: {e}")
+#         raise
 
