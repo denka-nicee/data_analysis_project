@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from airflow.hooks.base import BaseHook
 import math
 
-def calculate_correlation():
+def calculate_correlation_for_hours():
     # Получаем параметры подключения
     conn_id = 'dataset_db'  # conn_id, который используется в вашем Airflow
     conn = BaseHook.get_connection(conn_id)
@@ -15,11 +15,10 @@ def calculate_correlation():
     # SQL-запрос для извлечения данных
     query = """
     SELECT
-        app_id,
         positive_ratio,
         avg_hours
     FROM
-        dm.game_summary
+        dm.average_hours_hypothesis
     """
 
     # Чтение данных в DataFrame

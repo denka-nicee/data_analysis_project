@@ -6,9 +6,10 @@ from airflow import DAG
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.operators.python import PythonOperator
 
-from defs import stg_to_dds
+from defs.load_json import load_json
+from defs import calculate_correlation
 from defs.download import download_dataset
-from defs.stg_to_dds import  calculate_correlation
+from defs.calculate_correlation import  calculate_correlation_for_hours
 from defs.transform import process_and_load_games, process_and_load_recommendations, process_and_load_users
 from defs.upload import load_csv_to_postgres
 
@@ -85,7 +86,10 @@ def process_data():
         logger.error(f"Ошибка при обработке данных: {e}")
         raise
 
-def stg_to_dds():
+def get_load_json():
+    load_json()
+
+def get_correlation():
     calculate_correlation()
 
 
@@ -110,37 +114,45 @@ download_task = PythonOperator(
     python_callable=download_data,
     dag=dag,
 )
-
-
 # Определение задачи предобработки данных
-process_data_task = PythonOperator(
-    task_id='process_data',
-    python_callable=process_data,
-    dag=dag,
-)
-
+# process_data_task = PythonOperator(
+#     task_id='process_data',
+#     python_callable=process_data,
+#     dag=dag,
+# )
 # Задача для выполнения первого SQL-скрипта
+download_metadata = PythonOperator(
+    task_id='download_metadata',
+    python_callable=get_load_json,
+    dag = dag,
+)
 move_dds_to_stg = PostgresOperator(
     task_id='create_tables',
     sql="sql_scripts/move_dds_to_stg.sql",
     postgres_conn_id='dataset_db',
     dag=dag,
 )
-
-dds_to_dm = PostgresOperator(
-    task_id='create_dm',
-    sql="sql_scripts/dds_to_dm.sql",
+average_hours_dm = PostgresOperator(
+    task_id='create_average_hours_dm',
+    sql="sql_scripts/average_hours_dds_to_dm.sql",
     postgres_conn_id='dataset_db',
     dag=dag,
 )
-
-get_correlation = PythonOperator(
-    task_id='get_correlation',
-    python_callable=stg_to_dds,
+price_review_summery_dm = PostgresOperator(
+    task_id = 'create_price_review_dm',
+    sql = 'sql_scripts/price_review_summery_dds_to_dm.sql',
+    postgres_conn_id = 'dataset_db',
+    dag = dag,
+)
+get_correlation_for_hours = PythonOperator(
+    task_id='get_correlation_for_hours',
+    python_callable=calculate_correlation_for_hours,
     dag=dag,
 )
 
 
+
 # Установка порядка выполнения задач
-download_task >> process_data_task >> move_dds_to_stg >> dds_to_dm >> get_correlation
+# download_task >> [download_metadata, process_data_task] >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
+download_task >> download_metadata >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
 # download_task >> move_dds_to_stg >> dds_to_dm >> get_correlation

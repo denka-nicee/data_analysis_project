@@ -272,6 +272,8 @@ services:
         mkdir -p /sources/logs /sources/dags /sources/plugins
         chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
         
+        
+        
         airflow db init
         airflow users create \
         --username admin \
