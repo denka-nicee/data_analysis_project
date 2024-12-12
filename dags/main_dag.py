@@ -121,11 +121,11 @@ download_task = PythonOperator(
 #     dag=dag,
 # )
 # Задача для выполнения первого SQL-скрипта
-download_metadata = PythonOperator(
-    task_id='download_metadata',
-    python_callable=get_load_json,
-    dag = dag,
-)
+# process_metadata_task = PythonOperator(
+#     task_id='process_metadata',
+#     python_callable=get_load_json,
+#     dag = dag,
+# )
 move_dds_to_stg = PostgresOperator(
     task_id='create_tables',
     sql="sql_scripts/move_dds_to_stg.sql",
@@ -153,6 +153,7 @@ get_correlation_for_hours = PythonOperator(
 
 
 # Установка порядка выполнения задач
-# download_task >> [download_metadata, process_data_task] >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
-download_task >> download_metadata >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
+# download_task >> [process_metadata_task, process_data_task] >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
+download_task >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
+
 # download_task >> move_dds_to_stg >> dds_to_dm >> get_correlation

@@ -23,7 +23,7 @@ DROP TABLE IF EXISTS dds.games CASCADE;
 
 DROP TABLE IF EXISTS dds.recommendations CASCADE;
 
-
+DROP TABLE IF EXISTS dds.metadata CASCADE;
 
 -- Создаем новую таблицу с типами данных VARCHAR для рейтинга и соотношения положительных отзывов
 CREATE TABLE dds.games (
@@ -97,3 +97,13 @@ SELECT
     reviews
 FROM dds_stg.users;
 
+-- Создаем таблицу metadata в схеме dds, очищая данные от игр с пустыми tags
+CREATE TABLE dds.metadata AS
+SELECT
+    app_id,
+    tags
+FROM
+    dds_stg.metadata
+WHERE
+    tags <> '{}' -- Исключаем строки с пустыми tags
+;
