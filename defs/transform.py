@@ -1,6 +1,5 @@
 import logging
 
-
 import pandas as pd
 from airflow.hooks.base_hook import BaseHook
 from sqlalchemy import create_engine
@@ -104,13 +103,6 @@ def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000
     app_ids = set()
 
     try:
-        # table_size = get_table_size(engine, "games")
-        # max_size = 5*1024*1024
-        #
-        # if table_size > max_size:
-        #     logger.info(f"Размер таблицы 'games' превышает 5МБ ({table_size} байт). Загрузка пропущена.")
-        #     return app_ids
-
         # Удаляем таблицу, если она существует
         drop_table_if_exists(engine, "games")
 
@@ -124,12 +116,10 @@ def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000
             # Добавление app_id в сет
             app_ids.update(chunk['app_id'].unique())
 
-
             # Создаём схему, если она ещё не существует
             with engine.connect() as conn:
                 conn.execute("CREATE SCHEMA IF NOT EXISTS dds_stg;")
                 logger.info("Схема 'dds_stg' успешно создана или уже существует.")
-
 
             # Загрузка данных в базу данных
             chunk.to_sql("games", engine, schema='dds_stg', if_exists='append', index=False)
@@ -140,8 +130,6 @@ def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000
         raise
 
     return app_ids
-#
-
 
 
 # Обработка и загрузка данных о рекомендациях
@@ -153,10 +141,7 @@ def process_and_load_recommendations(path, app_ids, postgres_conn_id='dataset_db
     # Создаем соединение с базой данных
     engine = create_engine(db_url)
 
-
-
     try:
-
 
         # Удаляем таблицу, если она существует
         drop_table_if_exists(engine, "recommendations")
@@ -169,7 +154,7 @@ def process_and_load_recommendations(path, app_ids, postgres_conn_id='dataset_db
             common_transform(chunk, "recommendations")
 
             # Загрузка данных в базу данных
-            chunk.to_sql("recommendations", engine, schema = 'dds_stg', if_exists='append', index=False)
+            chunk.to_sql("recommendations", engine, schema='dds_stg', if_exists='append', index=False)
             logger.info(f"Загружено {len(chunk)} строк в таблицу recommendations")
 
     except Exception as e:
@@ -196,7 +181,7 @@ def process_and_load_users(path, postgres_conn_id='dataset_db', chunk_size=10000
             common_transform(chunk, "users")
 
             # Загрузка данных в базу данных
-            chunk.to_sql("users", engine, schema = 'dds_stg', if_exists='append', index=False)
+            chunk.to_sql("users", engine, schema='dds_stg', if_exists='append', index=False)
             logger.info(f"Загружено {len(chunk)} строк в таблицу users")
 
     except Exception as e:

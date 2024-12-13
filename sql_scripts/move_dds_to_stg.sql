@@ -1,9 +1,4 @@
--- noinspection SqlDialectInspectionForFile
-
--- noinspection SqlNoDataSourceInspectionForFile
-
 -- Создание схемы dds, если она не существует
-
 DROP SCHEMA IF EXISTS public;
 
 DO $$
@@ -13,8 +8,6 @@ BEGIN
     END IF;
 END;
 $$;
-
-
 
 -- Удаляем существующую таблицу, если она существует
 DROP TABLE IF EXISTS dds.users CASCADE;
@@ -48,16 +41,13 @@ SELECT
     CAST(price_final AS DECIMAL) AS price_final             -- Преобразуем в DECIMAL, если нужно
 FROM dds_stg.games;
 
-
-
-
 -- Создаем новую таблицу с типами данных VARCHAR для поля `is_recommended`
 CREATE TABLE dds.recommendations (
     app_id INT,
     helpful INT,
     funny INT,
     date DATE,  -- Оставляем тип DATE для поля `date`
-    is_recommended VARCHAR(255),  -- Тип данных изменен на VARCHAR
+    is_recommended VARCHAR(255),
     hours INT,
     user_id INT,
     review_id INT
@@ -73,20 +63,17 @@ SELECT
         WHEN date IS NULL THEN NULL
         ELSE TO_DATE(date, 'YYYY-MM-DD')  -- Преобразуем строку в формат DATE
     END AS date,
-    is_recommended,  -- Оставляем как есть (тип VARCHAR)
+    is_recommended,
     hours,
     user_id,
     review_id
 FROM dds_stg.recommendations;
 
-
--- Удаляем существующую таблицу, если она существует
-
 -- Создаем новую таблицу с типами данных VARCHAR для полей
 CREATE TABLE dds.users (
     user_id INT,
-    products VARCHAR(255),  -- Тип данных для products изменен на VARCHAR
-    reviews VARCHAR(255)   -- Тип данных для reviews изменен на VARCHAR
+    products VARCHAR(255),
+    reviews VARCHAR(255)
 );
 
 -- Вставляем данные в новую таблицу
@@ -105,5 +92,7 @@ SELECT
 FROM
     dds_stg.metadata
 WHERE
-    tags <> '{}' -- Исключаем строки с пустыми tags
+    cardinality(tags) > 0
 ;
+
+

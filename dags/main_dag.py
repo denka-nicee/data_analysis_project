@@ -3,15 +3,13 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
 
-from defs.load_json import load_json
-from defs import calculate_correlation
+from defs.calculate_correlation import calculate_correlation_for_hours
 from defs.download import download_dataset
-from defs.calculate_correlation import  calculate_correlation_for_hours
+from defs.load_json import load_json
 from defs.transform import process_and_load_games, process_and_load_recommendations, process_and_load_users
-from defs.upload import load_csv_to_postgres
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -69,12 +67,10 @@ def process_data():
 
         logger.info(f"Данные об играх обработаны")
 
-
         # Обработка данных о пользователях
         logger.info("Начало предобработки данных о пользователях")
         process_and_load_users(users_path)
         logger.info(f"Данные о пользователях обработаны")
-
 
         # Обработка данных о рекомендациях
         logger.info("Начало предобработки данных о рекомендациях")
@@ -85,12 +81,6 @@ def process_data():
     except Exception as e:
         logger.error(f"Ошибка при обработке данных: {e}")
         raise
-
-def get_load_json():
-    load_json()
-
-def get_correlation():
-    calculate_correlation()
 
 
 # Определение DAGа
@@ -115,45 +105,52 @@ download_task = PythonOperator(
     dag=dag,
 )
 # Определение задачи предобработки данных
-# process_data_task = PythonOperator(
-#     task_id='process_data',
-#     python_callable=process_data,
-#     dag=dag,
-# )
+process_data_task = PythonOperator(
+    task_id='process_data',
+    python_callable=process_data,
+    dag=dag,
+)
 # Задача для выполнения первого SQL-скрипта
-# process_metadata_task = PythonOperator(
-#     task_id='process_metadata',
-#     python_callable=get_load_json,
-#     dag = dag,
-# )
+process_metadata_task = PythonOperator(
+    task_id='process_metadata',
+    python_callable=load_json,
+    dag=dag,
+)
 move_dds_to_stg = PostgresOperator(
     task_id='create_tables',
     sql="sql_scripts/move_dds_to_stg.sql",
     postgres_conn_id='dataset_db',
     dag=dag,
 )
+
 average_hours_dm = PostgresOperator(
     task_id='create_average_hours_dm',
     sql="sql_scripts/average_hours_dds_to_dm.sql",
     postgres_conn_id='dataset_db',
     dag=dag,
 )
-price_review_summery_dm = PostgresOperator(
-    task_id = 'create_price_review_dm',
-    sql = 'sql_scripts/price_review_summery_dds_to_dm.sql',
-    postgres_conn_id = 'dataset_db',
-    dag = dag,
+
+price_review_summary_dm = PostgresOperator(
+    task_id='create_price_review_dm',
+    sql='sql_scripts/price_review_summery_dds_to_dm.sql',
+    postgres_conn_id='dataset_db',
+    dag=dag,
 )
+
 get_correlation_for_hours = PythonOperator(
     task_id='get_correlation_for_hours',
     python_callable=calculate_correlation_for_hours,
     dag=dag,
 )
 
-
+tags_summary_dm = PostgresOperator(
+    task_id='create_tags_summary_dm',
+    sql='sql_scripts/H3_tags_summary.sql',
+    postgres_conn_id='dataset_db',
+    dag=dag,
+)
 
 # Установка порядка выполнения задач
-# download_task >> [process_metadata_task, process_data_task] >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
-download_task >> move_dds_to_stg >> [average_hours_dm, price_review_summery_dm] >> get_correlation_for_hours
-
-# download_task >> move_dds_to_stg >> dds_to_dm >> get_correlation
+download_task >> [process_metadata_task, process_data_task] >> move_dds_to_stg >> [average_hours_dm,
+                                                                                   price_review_summary_dm,
+                                                                                   tags_summary_dm] >> get_correlation_for_hours
