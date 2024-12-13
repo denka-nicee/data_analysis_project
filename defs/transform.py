@@ -29,10 +29,10 @@ types_users = {
 def drop_table_if_exists(engine, table_name):
     try:
         with engine.connect() as conn:
-            conn.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE")
-            logger.info(f"Таблица {table_name} удалена (если она существовала).")
+            conn.execute(f"DROP TABLE IF EXISTS dds_stg.{table_name} CASCADE")
+            logger.info(f"Таблица dds_stg.{table_name} удалена (если она существовала).")
     except SQLAlchemyError as e:
-        logger.error(f"Ошибка при удалении таблицы {table_name}: {e}")
+        logger.error(f"Ошибка при удалении таблицы dds_stg.{table_name}: {e}")
 
 
 def common_transform(chunk, table_name):
@@ -64,11 +64,38 @@ def common_transform(chunk, table_name):
     return chunk
 
 
+def get_table_size(engine, table_name, schema='dds_stg'):
+    # Проверка наличия таблицы в схеме
+    check_table_query = f"""
+    SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables 
+        WHERE table_schema = '{schema}' AND table_name = '{table_name}'
+    ) AS table_exists;
+    """
+
+    with engine.connect() as conn:
+        table_exists = conn.execute(check_table_query).scalar()
+
+        # Если таблицы нет, возвращаем 0 как её размер
+        if not table_exists:
+            return 0
+
+        # Если таблица существует, проверяем её размер
+        size_query = f"""
+        SELECT pg_total_relation_size('"{schema}"."{table_name}"') AS size; 
+        """
+        result = conn.execute(size_query).fetchone()
+        return result['size'] if result else 0
+
+
 # Обработка и загрузка данных о играх
 def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000):
     # Получаем параметры подключения из Airflow
     conn_id = BaseHook.get_connection(postgres_conn_id)
-    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
+    # conn_id.schema = 'dds'
+    # print(conn_id.schema)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}?options=-csearch_path=dds_stg"
 
     # Создаем соединение с базой данных
     engine = create_engine(db_url)
@@ -89,8 +116,13 @@ def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000
             # Добавление app_id в сет
             app_ids.update(chunk['app_id'].unique())
 
+            # Создаём схему, если она ещё не существует
+            with engine.connect() as conn:
+                conn.execute("CREATE SCHEMA IF NOT EXISTS dds_stg;")
+                logger.info("Схема 'dds_stg' успешно создана или уже существует.")
+
             # Загрузка данных в базу данных
-            chunk.to_sql("games", engine, if_exists='append', index=False)
+            chunk.to_sql("games", engine, schema='dds_stg', if_exists='append', index=False)
             logger.info(f"Загружено {len(chunk)} строк в таблицу games")
 
     except Exception as e:
@@ -110,6 +142,7 @@ def process_and_load_recommendations(path, app_ids, postgres_conn_id='dataset_db
     engine = create_engine(db_url)
 
     try:
+
         # Удаляем таблицу, если она существует
         drop_table_if_exists(engine, "recommendations")
 
@@ -121,7 +154,7 @@ def process_and_load_recommendations(path, app_ids, postgres_conn_id='dataset_db
             common_transform(chunk, "recommendations")
 
             # Загрузка данных в базу данных
-            chunk.to_sql("recommendations", engine, if_exists='append', index=False)
+            chunk.to_sql("recommendations", engine, schema='dds_stg', if_exists='append', index=False)
             logger.info(f"Загружено {len(chunk)} строк в таблицу recommendations")
 
     except Exception as e:
@@ -139,6 +172,7 @@ def process_and_load_users(path, postgres_conn_id='dataset_db', chunk_size=10000
     engine = create_engine(db_url)
 
     try:
+
         # Удаляем таблицу, если она существует
         drop_table_if_exists(engine, "users")
 
@@ -147,7 +181,7 @@ def process_and_load_users(path, postgres_conn_id='dataset_db', chunk_size=10000
             common_transform(chunk, "users")
 
             # Загрузка данных в базу данных
-            chunk.to_sql("users", engine, if_exists='append', index=False)
+            chunk.to_sql("users", engine, schema='dds_stg', if_exists='append', index=False)
             logger.info(f"Загружено {len(chunk)} строк в таблицу users")
 
     except Exception as e:
