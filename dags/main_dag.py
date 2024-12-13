@@ -150,7 +150,7 @@ tags_summary_dm = PostgresOperator(
     dag=dag,
 )
 
-# Установка порядка выполнения задач
-download_task >> [process_metadata_task, process_data_task] >> move_dds_to_stg >> [average_hours_dm,
+# # Установка порядка выполнения задач
+(download_task >> [process_metadata_task, process_data_task] >> move_dds_to_stg >> [average_hours_dm,
                                                                                    price_review_summary_dm,
-                                                                                   tags_summary_dm] >> get_correlation_for_hours
+                                                                                   tags_summary_dm] >> get_correlation_for_hours)
