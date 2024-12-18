@@ -289,8 +289,17 @@ services:
         --conn-password 'postgres_password' \
         --conn-schema 'postgres_db' \
         --conn-port '5432'
-
+    
+        docker exec -it --user root data_analysis_project-airflow-scheduler-1 bash
+        chown -R airflow:root /opt/airflow/logs/scheduler
+        sudo chmod -R 777 /opt/airflow/logs
+        exit
+        
+        
         exec /entrypoint airflow version
+        
+        
+
     # yamllint enable rule:line-length
     environment:
       <<: *airflow-common-env
