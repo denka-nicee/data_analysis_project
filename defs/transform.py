@@ -5,6 +5,12 @@ from airflow.hooks.base_hook import BaseHook
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 
+import psycopg2
+from psycopg2 import sql
+import pandas as pd
+from airflow.hooks.base_hook import BaseHook
+import os
+
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
@@ -64,75 +70,254 @@ def common_transform(chunk, table_name):
     return chunk
 
 
-def get_table_size(engine, table_name, schema='dds_stg'):
-    # Проверка наличия таблицы в схеме
-    check_table_query = f"""
-    SELECT EXISTS (
-        SELECT 1
-        FROM information_schema.tables 
-        WHERE table_schema = '{schema}' AND table_name = '{table_name}'
-    ) AS table_exists;
+
+
+
+#ПОДКЛЮЧАЕТ ПРИ ПОМОЩИ COPY
+def load_data_to_postgres_using_copy(path, postgres_conn_id='dataset_db'):
     """
+    Загружает данные в базу данных с использованием утилиты COPY через psycopg2.
 
-    with engine.connect() as conn:
-        table_exists = conn.execute(check_table_query).scalar()
-
-        # Если таблицы нет, возвращаем 0 как её размер
-        if not table_exists:
-            return 0
-
-        # Если таблица существует, проверяем её размер
-        size_query = f"""
-        SELECT pg_total_relation_size('"{schema}"."{table_name}"') AS size; 
-        """
-        result = conn.execute(size_query).fetchone()
-        return result['size'] if result else 0
-
-
-# Обработка и загрузка данных о играх
-def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000):
+    :param path: Путь к файлу CSV.
+    :param postgres_conn_id: ID подключения к базе данных в Airflow.
+    """
     # Получаем параметры подключения из Airflow
     conn_id = BaseHook.get_connection(postgres_conn_id)
-    # conn_id.schema = 'dds'
-    # print(conn_id.schema)
-    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}?options=-csearch_path=dds_stg"
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
 
-    # Создаем соединение с базой данных
+    # Устанавливаем соединение с базой данных через sqlalchemy
     engine = create_engine(db_url)
 
-    app_ids = set()
-
     try:
+        # Проверка существования файла
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Файл не найден: {path}")
+        if os.path.getsize(path) == 0:
+            raise ValueError(f"Файл пуст: {path}")
+
         # Удаляем таблицу, если она существует
-        drop_table_if_exists(engine, "games")
+        drop_table_if_exists(engine, 'games')
 
-        # Чтение данных из CSV по частям
-        for chunk in pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunk_size):
-            # Удаляем игры с "DLC" или "Soundtrack" в названии
-            chunk = chunk[~chunk['title'].str.contains("DLC|Soundtrack", case=False, na=False)]
+        # Чтение данных из CSV с помощью pandas
+        df = pd.read_csv(path, encoding='ISO-8859-1')
 
-            common_transform(chunk, "games")
+        # Убедимся, что DataFrame имеет правильные типы данных
+        # Преобразование типов в соответствии с заданными
+        types_games = {
+            'app_id': 'int', 'title': 'str', 'date_release': 'datetime64[ns]', 'win': 'bool', 'mac': 'bool',
+            'linux': 'bool', 'rating': 'str', 'positive_ratio': 'int', 'user_reviews': 'int', 'price_final': 'float64',
+            'price_original': 'float64', 'discount': 'float64', 'steam_deck': 'bool'
+        }
 
-            # Добавление app_id в сет
-            app_ids.update(chunk['app_id'].unique())
+        # Преобразуем типы данных DataFrame согласно заданным типам
+        df = df.astype(types_games)
 
-            # Создаём схему, если она ещё не существует
-            with engine.connect() as conn:
-                conn.execute("CREATE SCHEMA IF NOT EXISTS dds_stg;")
-                logger.info("Схема 'dds_stg' успешно создана или уже существует.")
+        # Загружаем данные в базу
+        df.to_sql('games', engine, schema='dds_stg', if_exists='replace', index=False)
 
-            # Загрузка данных в базу данных
-            chunk.to_sql("games", engine, schema='dds_stg', if_exists='append', index=False)
-            logger.info(f"Загружено {len(chunk)} строк в таблицу games")
+        print(f"Данные из файла {path} успешно загружены в таблицу dds_stg.games")
 
     except Exception as e:
-        logger.error(f"Ошибка при обработке и загрузке данных о играх: {e}")
-        raise
+        print(f"Ошибка при загрузке данных: {e}")
+    finally:
+        # Закрываем соединение
+        engine.dispose()
 
-    return app_ids
+
+def load_recommendations_to_postgres(path, postgres_conn_id='dataset_db', chunksize=10000):
+    """
+    Загружает данные о рекомендациях в базу данных чанками с использованием psycopg2 и команды COPY.
+
+    :param path: Путь к файлу CSV.
+    :param postgres_conn_id: ID подключения к базе данных в Airflow.
+    :param chunksize: Количество строк в одном чанке.
+    """
+    import tempfile
+
+    # Получаем параметры подключения из Airflow
+    conn_id = BaseHook.get_connection(postgres_conn_id)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
+
+    # Устанавливаем соединение с базой данных
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+
+    try:
+        # Проверка существования файла
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Файл не найден: {path}")
+        if os.path.getsize(path) == 0:
+            raise ValueError(f"Файл пуст: {path}")
+
+        # Удаление таблицы перед загрузкой данных
+        table_name = 'recommendations'
+        try:
+            cur.execute(f"DROP TABLE IF EXISTS dds_stg.{table_name} CASCADE")
+            conn.commit()
+            print(f"Таблица dds_stg.{table_name} успешно удалена (если существовала).")
+        except Exception as e:
+            print(f"Ошибка при удалении таблицы dds_stg.{table_name}: {e}")
+            conn.rollback()
+            raise
+
+        # Создание таблицы (пример, необходимо настроить в зависимости от структуры данных)
+        cur.execute("""
+            CREATE TABLE dds_stg.recommendations (
+                app_id INT,
+                helpful INT,
+                funny INT,
+                date TIMESTAMP,
+                is_recommended BOOLEAN,
+                hours FLOAT,
+                user_id INT,
+                review_id INT
+            )
+        """)
+        conn.commit()
+        print(f"Таблица dds_stg.{table_name} успешно создана.")
+
+        # Определяем типы данных
+        types_recommendations = {
+            'app_id': int, 'helpful': int, 'funny': int, 'date': 'str',
+            'is_recommended': bool, 'hours': float, 'user_id': int, 'review_id': int
+        }
+
+        # Чтение файла чанками
+        chunk_iter = pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunksize)
+
+        for i, chunk in enumerate(chunk_iter, start=1):
+            print(f"Обработка чанка {i}...")
+
+            # Приводим типы данных в текущем чанке
+            chunk = chunk.astype(types_recommendations)
+
+            # Преобразуем дату в формат, подходящий для PostgreSQL
+            chunk['date'] = pd.to_datetime(chunk['date'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
+
+            # Сохраняем чанк во временный CSV-файл
+            with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.csv') as temp_file:
+                chunk.to_csv(temp_file.name, index=False, header=False)
+                temp_file_path = temp_file.name
+
+            # Используем команду COPY для загрузки данных из временного файла
+            with open(temp_file_path, 'r', encoding='utf-8') as f:
+                copy_sql = f"COPY dds_stg.{table_name} FROM STDIN WITH CSV DELIMITER ','"
+                cur.copy_expert(copy_sql, f)
+                conn.commit()
+
+            # Удаляем временный файл
+            os.remove(temp_file_path)
+
+        print(f"Данные из файла {path} успешно загружены в таблицу dds_stg.{table_name}")
+
+    except Exception as e:
+        print(f"Ошибка при загрузке данных: {e}")
+        conn.rollback()
+    finally:
+        # Закрываем соединение
+        cur.close()
+        conn.close()
 
 
-# Обработка и загрузка данных о рекомендациях
+
+
+def load_users_to_postgres(path, postgres_conn_id='dataset_db', chunksize=20000):
+    """
+    Загружает данные о пользователях в базу данных чанками с использованием psycopg2 и команды COPY.
+
+    :param path: Путь к файлу CSV.
+    :param postgres_conn_id: ID подключения к базе данных в Airflow.
+    :param chunksize: Количество строк в одном чанке.
+    """
+    import tempfile
+
+    # Получаем параметры подключения из Airflow
+    conn_id = BaseHook.get_connection(postgres_conn_id)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
+
+    # Устанавливаем соединение с базой данных
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+
+    try:
+        # Проверка существования файла
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Файл не найден: {path}")
+        if os.path.getsize(path) == 0:
+            raise ValueError(f"Файл пуст: {path}")
+
+        # Удаление таблицы перед загрузкой данных
+        table_name = 'users'
+        try:
+            cur.execute(f"DROP TABLE IF EXISTS dds_stg.{table_name} CASCADE")
+            conn.commit()
+            print(f"Таблица dds_stg.{table_name} успешно удалена (если существовала).")
+        except Exception as e:
+            print(f"Ошибка при удалении таблицы dds_stg.{table_name}: {e}")
+            conn.rollback()
+            raise
+
+        # Создание таблицы (пример, необходимо настроить в зависимости от структуры данных)
+        cur.execute("""
+            CREATE TABLE dds_stg.users (
+                user_id INT,
+                products INT,
+                reviews INT
+            )
+        """)
+        conn.commit()
+        print(f"Таблица dds_stg.{table_name} успешно создана.")
+
+        # Определяем типы данных
+        types_users = {
+            'user_id': int, 'products': int, 'reviews': int
+        }
+
+        # Чтение файла чанками
+        chunk_iter = pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunksize)
+
+        for i, chunk in enumerate(chunk_iter, start=1):
+            print(f"Обработка чанка {i}...")
+
+            # Приводим типы данных в текущем чанке
+            chunk = chunk.astype(types_users)
+
+            # Сохраняем чанк во временный CSV-файл
+            with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.csv') as temp_file:
+                chunk.to_csv(temp_file.name, index=False, header=False)
+                temp_file_path = temp_file.name
+
+            # Используем команду COPY для загрузки данных из временного файла
+            with open(temp_file_path, 'r', encoding='utf-8') as f:
+                copy_sql = f"COPY dds_stg.{table_name} FROM STDIN WITH CSV DELIMITER ','"
+                cur.copy_expert(copy_sql, f)
+                conn.commit()
+
+            # Удаляем временный файл
+            os.remove(temp_file_path)
+
+        print(f"Данные из файла {path} успешно загружены в таблицу dds_stg.{table_name}")
+
+    except Exception as e:
+        print(f"Ошибка при загрузке данных: {e}")
+        conn.rollback()
+    finally:
+        # Закрываем соединение
+        cur.close()
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
+
+## Обработка и загрузка данных о рекомендациях
 def process_and_load_recommendations(path, app_ids, postgres_conn_id='dataset_db', chunk_size=10000):
     # Получаем параметры подключения из Airflow
     conn_id = BaseHook.get_connection(postgres_conn_id)
@@ -187,3 +372,46 @@ def process_and_load_users(path, postgres_conn_id='dataset_db', chunk_size=10000
     except Exception as e:
         logger.error(f"Ошибка при обработке и загрузке данных о пользователях: {e}")
         raise
+
+
+# Обработка и загрузка данных о играх
+def process_and_load_games(path, postgres_conn_id='dataset_db', chunk_size=10000):
+    # Получаем параметры подключения из Airflow
+    conn_id = BaseHook.get_connection(postgres_conn_id)
+    # conn_id.schema = 'dds'
+    # print(conn_id.schema)
+    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}?options=-csearch_path=dds_stg"
+
+    # Создаем соединение с базой данных
+    engine = create_engine(db_url)
+
+    app_ids = set()
+
+    try:
+        # Удаляем таблицу, если она существует
+        drop_table_if_exists(engine, "games")
+
+        # Чтение данных из CSV по частям
+        for chunk in pd.read_csv(path, encoding='ISO-8859-1', chunksize=chunk_size):
+            # Удаляем игры с "DLC" или "Soundtrack" в названии
+            chunk = chunk[~chunk['title'].str.contains("DLC|Soundtrack", case=False, na=False)]
+
+            common_transform(chunk, "games")
+
+            # Добавление app_id в сет
+            app_ids.update(chunk['app_id'].unique())
+
+            # Создаём схему, если она ещё не существует
+            with engine.connect() as conn:
+                conn.execute("CREATE SCHEMA IF NOT EXISTS dds_stg;")
+                logger.info("Схема 'dds_stg' успешно создана или уже существует.")
+
+            # Загрузка данных в базу данных
+            chunk.to_sql("games", engine, schema='dds_stg', if_exists='append', index=False)
+            logger.info(f"Загружено {len(chunk)} строк в таблицу games")
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке и загрузке данных о играх: {e}")
+        raise
+
+    return app_ids

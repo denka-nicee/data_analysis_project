@@ -9,7 +9,8 @@ from airflow.providers.postgres.operators.postgres import PostgresOperator
 from defs.calculate_correlation import calculate_correlation_for_hours
 from defs.download import download_dataset
 from defs.load_json import load_json
-from defs.transform import process_and_load_games, process_and_load_recommendations, process_and_load_users
+from defs.transform import process_and_load_games, process_and_load_recommendations, process_and_load_users, \
+    load_data_to_postgres_using_copy, load_users_to_postgres, load_recommendations_to_postgres
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -64,17 +65,21 @@ def process_data():
         logger.info("Начало предобработки данных о играх")
 
         app_ids = process_and_load_games(games_path)
+        # app_ids = load_data_to_postgres_using_copy(games_path)
+
 
         logger.info(f"Данные об играх обработаны")
 
         # Обработка данных о пользователях
         logger.info("Начало предобработки данных о пользователях")
-        process_and_load_users(users_path)
+        # process_and_load_users(users_path)
+        load_users_to_postgres(users_path)
         logger.info(f"Данные о пользователях обработаны")
 
         # Обработка данных о рекомендациях
         logger.info("Начало предобработки данных о рекомендациях")
-        process_and_load_recommendations(recommendations_path, app_ids)
+        # process_and_load_recommendations(recommendations_path, app_ids)
+        load_recommendations_to_postgres(recommendations_path)
         logger.info(f"Данные о рекомендациях обработаны")
 
 
