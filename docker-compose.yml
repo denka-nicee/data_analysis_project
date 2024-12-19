@@ -336,5 +336,12 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  grafana:
+    image: grafana/grafana-enterprise
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+
 volumes:
   postgres-db-volume:
