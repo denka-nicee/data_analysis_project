@@ -16,8 +16,6 @@ numpy
 # Библиотека для работы с Kaggle (если потребуется в будущем)
 kaggle
 
-psycopg2-binary
-
 
 
 
