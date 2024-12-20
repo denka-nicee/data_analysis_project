@@ -29,24 +29,12 @@ CREATE TABLE dds.games (
     price_final DECIMAL
 );
 
--- Вставляем данные в новую таблицу с учетом преобразования типов
-INSERT INTO dds.games (app_id, title, date_release, rating, positive_ratio, user_reviews, price_final)
-SELECT
-    app_id,
-    title,
-    TO_DATE(date_release, 'YYYY-MM-DD') AS date_release,  -- Преобразуем строку в тип DATE
-    rating,  -- Оставляем как есть (тип VARCHAR)
-    positive_ratio,  -- Оставляем как есть (тип VARCHAR)
-    CAST(user_reviews AS INT) AS user_reviews,             -- Преобразуем в INT, если нужно
-    CAST(price_final AS DECIMAL) AS price_final             -- Преобразуем в DECIMAL, если нужно
-FROM dds_stg.games;
-
--- Создаем новую таблицу с типами данных VARCHAR для поля `is_recommended`
+-- Создаем таблицу dds.recommendations
 CREATE TABLE dds.recommendations (
     app_id INT,
     helpful INT,
     funny INT,
-    date DATE,  -- Оставляем тип DATE для поля `date`
+    date VARCHAR(255),
     is_recommended VARCHAR(255),
     hours INT,
     user_id INT,
@@ -54,15 +42,24 @@ CREATE TABLE dds.recommendations (
 );
 
 -- Вставляем данные в новую таблицу с учетом преобразования типов
+INSERT INTO dds.games (app_id, title, date_release, rating, positive_ratio, user_reviews, price_final)
+SELECT
+    app_id,
+    title,
+    date_release::date AS date_release,  -- Преобразуем timestamp в DATE
+    rating,
+    positive_ratio,
+    user_reviews,
+    price_final
+FROM dds_stg.games;
+
+-- Создаем новую таблицу с типами данных VARCHAR для поля `is_recommended`
 INSERT INTO dds.recommendations (app_id, helpful, funny, date, is_recommended, hours, user_id, review_id)
 SELECT
     app_id,
     helpful,
     funny,
-    CASE
-        WHEN date IS NULL THEN NULL
-        ELSE TO_DATE(date, 'YYYY-MM-DD')  -- Преобразуем строку в формат DATE
-    END AS date,
+    date,
     is_recommended,
     hours,
     user_id,
@@ -72,8 +69,8 @@ FROM dds_stg.recommendations;
 -- Создаем новую таблицу с типами данных VARCHAR для полей
 CREATE TABLE dds.users (
     user_id INT,
-    products VARCHAR(255),
-    reviews VARCHAR(255)
+    products INT,
+    reviews INT
 );
 
 -- Вставляем данные в новую таблицу

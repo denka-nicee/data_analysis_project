@@ -70,17 +70,7 @@ def common_transform(chunk, table_name):
     return chunk
 
 
-
-
-
-#ПОДКЛЮЧАЕТ ПРИ ПОМОЩИ COPY
 def load_data_to_postgres_using_copy(path, postgres_conn_id='dataset_db'):
-    """
-    Загружает данные в базу данных с использованием утилиты COPY через psycopg2.
-
-    :param path: Путь к файлу CSV.
-    :param postgres_conn_id: ID подключения к базе данных в Airflow.
-    """
     # Получаем параметры подключения из Airflow
     conn_id = BaseHook.get_connection(postgres_conn_id)
     db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
@@ -125,13 +115,6 @@ def load_data_to_postgres_using_copy(path, postgres_conn_id='dataset_db'):
 
 
 def load_recommendations_to_postgres(path, postgres_conn_id='dataset_db', chunksize=10000):
-    """
-    Загружает данные о рекомендациях в базу данных чанками с использованием psycopg2 и команды COPY.
-
-    :param path: Путь к файлу CSV.
-    :param postgres_conn_id: ID подключения к базе данных в Airflow.
-    :param chunksize: Количество строк в одном чанке.
-    """
     import tempfile
 
     # Получаем параметры подключения из Airflow
@@ -219,16 +202,7 @@ def load_recommendations_to_postgres(path, postgres_conn_id='dataset_db', chunks
         conn.close()
 
 
-
-
 def load_users_to_postgres(path, postgres_conn_id='dataset_db', chunksize=20000):
-    """
-    Загружает данные о пользователях в базу данных чанками с использованием psycopg2 и команды COPY.
-
-    :param path: Путь к файлу CSV.
-    :param postgres_conn_id: ID подключения к базе данных в Airflow.
-    :param chunksize: Количество строк в одном чанке.
-    """
     import tempfile
 
     # Получаем параметры подключения из Airflow
@@ -305,16 +279,6 @@ def load_users_to_postgres(path, postgres_conn_id='dataset_db', chunksize=20000)
         # Закрываем соединение
         cur.close()
         conn.close()
-
-
-
-
-
-
-
-
-
-
 
 
 ## Обработка и загрузка данных о рекомендациях
