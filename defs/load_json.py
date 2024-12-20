@@ -2,10 +2,12 @@ import json
 import logging
 import os
 
+import numpy as np
 import pandas as pd
+import psycopg2
 from airflow.hooks.base_hook import BaseHook
-from sqlalchemy import create_engine, Text
-from sqlalchemy.dialects.postgresql import ARRAY
+from psycopg2 import sql
+from psycopg2.extras import execute_values
 
 logger = logging.getLogger(__name__)
 
@@ -19,31 +21,85 @@ def read_json_data(path):
         raise
 
 
-def create_schema_if_not_exists(engine):
-    with engine.connect() as conn:
-        conn.execute("CREATE SCHEMA IF NOT EXISTS dds_stg;")
-        logger.info("Схема 'dds_stg' успешно создана или уже существует.")
-
-
-def drop_table_if_exists(engine, table_name):
-    with engine.connect() as conn:
-        conn.execute(f"DROP TABLE IF EXISTS dds_stg.{table_name};")
-        logger.info(f"Таблица {table_name} успешно удалена.")
-
-
-def load_data_to_postgres(chunk, engine, table_name):
+def create_schema_if_not_exists(conn):
     try:
-        chunk.to_sql(
-            table_name,
-            engine,
-            schema='dds_stg',
-            if_exists='append',
-            index=False,
-            dtype={'tags': ARRAY(Text)}
-        )
-        logger.info(f"Загружено {len(chunk)} строк в таблицу {table_name}")
+        with conn.cursor() as cur:
+            cur.execute("CREATE SCHEMA IF NOT EXISTS dds_stg;")
+            conn.commit()
+            logger.info("Схема 'dds_stg' успешно создана или уже существует.")
+    except Exception as e:
+        logger.error(f"Ошибка при создании схемы: {e}")
+        conn.rollback()
+        raise
+
+
+def drop_table_if_exists(conn, table_name):
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("DROP TABLE IF EXISTS dds_stg.{table}").format(
+                table=sql.Identifier(table_name)
+            ))
+            conn.commit()
+            logger.info(f"Таблица {table_name} успешно удалена.")
+    except Exception as e:
+        logger.error(f"Ошибка при удалении таблицы {table_name}: {e}")
+        conn.rollback()
+        raise
+
+
+def create_table(conn, table_name):
+    try:
+        with conn.cursor() as cur:
+            create_table_query = sql.SQL("""
+                CREATE TABLE dds_stg.{table} (
+                    app_id BIGINT PRIMARY KEY,
+                    tags TEXT[]
+                )
+            """).format(table=sql.Identifier(table_name))
+            cur.execute(create_table_query)
+            conn.commit()
+            logger.info(f"Таблица {table_name} успешно создана.")
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблицы {table_name}: {e}")
+        conn.rollback()
+        raise
+
+
+def load_data_to_postgres_psycopg(df, conn, table_name):
+    try:
+        # Преобразуем все столбцы в стандартные типы Python
+        # Это помогает избежать проблем с адаптацией типов psycopg2
+        df = df.convert_dtypes()
+
+        # Преобразуем 'app_id' в стандартный тип Python int
+        if pd.api.types.is_integer_dtype(df['app_id']):
+            df['app_id'] = df['app_id'].astype(int)
+        else:
+            logger.warning("'app_id' не является целочисленным типом. Попытка преобразовать в int.")
+            df['app_id'] = df['app_id'].apply(lambda x: int(x) if not pd.isnull(x) else None)
+
+        # Убедимся, что 'tags' является списком строк
+        df['tags'] = df['tags'].apply(lambda x: x if isinstance(x, list) else [])
+
+        # Подготовка данных в виде списка кортежей
+        records = df.to_dict(orient='records')
+        data = [(record['app_id'], record['tags']) for record in records]
+
+        # Определение SQL-запроса для массовой вставки
+        insert_query = sql.SQL("""
+            INSERT INTO dds_stg.{table} (app_id, tags)
+            VALUES %s
+            ON CONFLICT (app_id) DO NOTHING
+        """).format(table=sql.Identifier(table_name))
+
+        # Выполнение массовой вставки с использованием execute_values
+        with conn.cursor() as cur:
+            execute_values(cur, insert_query.as_string(conn), data, page_size=1000)
+            conn.commit()
+            logger.info(f"Загружено {len(data)} строк в таблицу {table_name}")
     except Exception as e:
         logger.error(f"Ошибка при загрузке данных в таблицу {table_name}: {e}")
+        conn.rollback()
         raise
 
 
@@ -57,7 +113,19 @@ def read_and_process_json(path):
             for line in file:
                 data = json.loads(line)
                 if 'app_id' in data and 'tags' in data:
-                    records.append({'app_id': data['app_id'], 'tags': data['tags']})
+                    # Убедимся, что 'tags' является списком
+                    tags = data['tags'] if isinstance(data['tags'], list) else []
+                    # Убедимся, что 'app_id' является целым числом
+                    app_id = data['app_id']
+                    if isinstance(app_id, (int, np.integer)):
+                        app_id = int(app_id)
+                    else:
+                        try:
+                            app_id = int(app_id)
+                        except ValueError:
+                            logger.warning(f"Не удалось преобразовать 'app_id' {app_id} в int. Пропускаем запись.")
+                            continue
+                    records.append({'app_id': app_id, 'tags': tags})
         df = pd.DataFrame(records)
         return df
     except Exception as e:
@@ -82,6 +150,9 @@ def load_json():
         logger.info("Начало предобработки данных о играх")
         df = read_and_process_json(json_path)
 
+        # Проверка типов данных
+        logger.info(f"Типы данных в DataFrame:\n{df.dtypes}")
+
         # Загрузка данных в PostgreSQL
         postgres_conn_id = 'dataset_db'
         process_and_load_to_postgres(df, postgres_conn_id, table_name="metadata")
@@ -95,22 +166,26 @@ def load_json():
 
 def process_and_load_to_postgres(df, postgres_conn_id, table_name="metadata"):
     """
-    Загружает DataFrame в PostgreSQL.
+    Загружает DataFrame в PostgreSQL с помощью psycopg2.
     """
-    conn_id = BaseHook.get_connection(postgres_conn_id)
-    db_url = f"postgresql://{conn_id.login}:{conn_id.password}@{conn_id.host}:{conn_id.port}/{conn_id.schema}"
-    engine = create_engine(db_url)
+    conn_details = BaseHook.get_connection(postgres_conn_id)
+    conn_string = f"host={conn_details.host} port={conn_details.port} dbname={conn_details.schema} user={conn_details.login} password={conn_details.password}"
 
     try:
-        # Создание схемы и удаление старой таблицы
-        create_schema_if_not_exists(engine)
-        drop_table_if_exists(engine, table_name)
+        # Устанавливаем соединение с базой данных
+        with psycopg2.connect(conn_string) as conn:
+            # Создание схемы, если не существует
+            create_schema_if_not_exists(conn)
 
-        # Загрузка данных
-        load_data_to_postgres(df, engine, table_name)
+            # Удаление старой таблицы, если она существует
+            drop_table_if_exists(conn, table_name)
+
+            # Создание таблицы
+            create_table(conn, table_name)
+
+            # Загрузка данных
+            load_data_to_postgres_psycopg(df, conn, table_name)
 
     except Exception as e:
         logger.error(f"Ошибка при загрузке данных в PostgreSQL: {e}")
         raise
-    finally:
-        engine.dispose()
